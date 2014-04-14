@@ -11,7 +11,7 @@
 #define PROTOCOL_NAME "chatroom-0.1"
 #define LF "\n"
 
-char buffer[BUFFER_SIZE];
+//char buffer[BUFFER_SIZE];
 int local_seq = 0;
 int remote_seq;
 
@@ -194,9 +194,29 @@ int compose_resp_msg(const Response resp, char **msg_o) {
 	return len;
 }
 
+int compose_broadcast_msg(const char *i_msg, char **o_msg) {
+	int len = 0;
+	char *msg;
+
+	// Calculate msg length
+	len += strlen(PROTOCOL_NAME) + strlen(LF);
+	len += strlen(LF);
+	len += strlen(i_msg);
+
+	msg = (char *) malloc(sizeof(char) * (len + 1));
+	strcat(msg, PROTOCOL_NAME);
+	strcat(msg, LF);
+	strcat(msg, LF);
+	strcat(msg, i_msg);
+	msg[len] = '\0';
+	*o_msg = msg;
+	return len;
+}
+
 /* Receive message from given socket. addr outputs the remote address,
  * body_p outputs the packet body. Returns the number of bytes read */
 int recv_packet(int sock, struct sockaddr_in *addr, char **body_p) {
+	char buffer[BUFFER_SIZE];
 	int nbytes;
 	char *body;
 	socklen_t size = (socklen_t) sizeof(struct sockaddr_in);
@@ -207,6 +227,7 @@ int recv_packet(int sock, struct sockaddr_in *addr, char **body_p) {
 		strncpy(body, buffer, nbytes);
 		body[nbytes] = '\0';
 		*body_p = body;
+		printf("Received:\n----\n%s\n----\n", body);
 	}
 	return nbytes;
 }
@@ -333,6 +354,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 //	set_recv_timeout(sock, RECV_TIMEOUT);
 	req->seq = local_seq;
 	len = compose_req_msg(*req, &msg);
+	printf("Send:\n----\n%s\n", msg);
 	if(len < 0) {
 		perror("compose_req_msg");
 		return -1;
@@ -354,7 +376,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 		perror("Ack number does not match");
 		return -4;
 	}
-	shutdown(sock, 0); // Close socket
+//	shutdown(sock, 0); // Close socket
 	local_seq++;
 	return 0;
 }
@@ -379,7 +401,27 @@ int send_response(const struct sockaddr_in addr, Response *resp) {
 	if(nbytes < 0) {
 		return -1;
 	}
-	shutdown(sock, 0); // Close socket
+//	shutdown(sock, 0); // Close socket
 	local_seq++;
 	return 0;
 }
+
+//int send_broadcast(const struct sockaddr_in addr, char *bc_msg) {
+//	int sock;
+//	int len;
+//	int nbytes;
+//	char *msg;
+//
+//	sock = make_req_socket();
+//	//	set_recv_timeout(sock, RECV_TIMEOUT);
+//	len = compose_broadcast_msg(bc_msg, &msg);
+//
+//	// Send message
+//	nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
+//					(socklen_t) sizeof(struct sockaddr_in));
+//	if(nbytes < 0) {
+//		return -1;
+//	}
+//	shutdown(sock, 0); // Close socket
+//	return 0;
+//}

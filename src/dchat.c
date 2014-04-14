@@ -11,6 +11,10 @@
 #include "conn-protocol.h"
 
 #define CHATTER_LIMIT 500
+#define REQ_JOIN "join"
+#define REQ_BROADCAST "broadcast"
+#define REQ_MESSAGE "message"
+#define REQ_QUIT "quit"
 
 typedef struct chatter {
 	char *name;
@@ -27,19 +31,22 @@ void start_client(char *);
 void *(listening_for_requests());
 void print_current_chatters();
 void process_broadcast();
-void send_broadcast(char *);
+void add_broadcast(char *);
 void handle_request(const Request, Response *);
 void handle_join(const Request, Response *);
+void handle_message(const Request, Response *);
 int encode_chatters(char **);
 int decode_chatters(char *);
 Chatter * decode_chatter(char *);
 void start_input();
+void *(listening_for_broadcasts());
+void handle_broadcast(const Request, Response *);
 
 Chatter chatters[CHATTER_LIMIT]; // Chatters array
 int nchatters = 0;
-char *broadcast_msg;// Broadcast message
 struct sockaddr_in listen_addr; // Listening address
 int listen_sock; // Listening socket
+char *broadcast_msg;// Broadcast message
 pthread_t listen_thread; // Listening thread
 struct sockaddr_in *leader_addr; // Leader's address
 
@@ -87,7 +94,62 @@ int main(int argc, char *argv[]) {
 }
 
 void help() {
-	printf("dchat USER [ADDR:PORT]\n");
+	printf("dchat NAME [ADDR:PORT]\n");
+}
+
+void encap_params(Request *req, int argn, ...) {
+	va_list ap;
+	int i;
+
+	if(req == NULL) {
+		return;
+	}
+	va_start(ap, argn);
+	req->paramsn = argn;
+	req->params = (char **) malloc(sizeof(char *) * argn);
+	for(i = 0; i < argn; i++) {
+		req->params[i] = (char *) va_arg(ap, char *);
+	}
+}
+
+char * get_message_string(const char *name, const char *msg) {
+	char *res;
+	int len = 0;
+	len += strlen(name);
+	len += strlen(": ");
+	len += strlen(msg);
+	res = (char *) malloc(sizeof(char) * (len + 1));
+	strcat(res, name);
+	strcat(res, ": ");
+	strcat(res, msg);
+	res[len] = '\0';
+	return res;
+}
+
+void start_input() {
+	char *input = NULL;
+	size_t size;
+	Request req;
+	Response resp;
+	int len;
+	while(1) {
+		getline(&input, &size, stdin);
+		len = strlen(input);
+		if(len > 0) {
+			input[len - 1] = '\0'; // Remove new line
+		}
+		if(strlen(input) == 0) {
+			continue;
+		}
+		if(leader) {
+			add_broadcast(get_message_string(username, input));
+			process_broadcast();
+		} else {
+			req.req = REQ_MESSAGE;
+			encap_params(&req, 2, username, input);
+			send_request(*leader_addr, &req, &resp);
+		}
+	}
 }
 
 void start_leader() {
@@ -110,73 +172,20 @@ void start_leader() {
 	printf("Waiting for others to join...\n");
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
-	pthread_join(listen_thread, NULL);
+//	pthread_join(listen_thread, NULL);
 
 	start_input();
 }
 
-void encap_params(Request *req, int argn, ...) {
-	va_list ap;
+void print_current_chatters() {
 	int i;
+	Chatter chatter;
 
-	if(req == NULL) {
-		return;
+	for(i = 0; i < nchatters; i++) {
+		chatter = chatters[i];
+		printf("%s %s:%d%s\n", chatter.name, chatter.host,
+				chatter.port, chatter.leader ? " (Leader)" : "");
 	}
-	va_start(ap, argn);
-	req->paramsn = argn;
-	req->params = (char **) malloc(sizeof(char *) * argn);
-	for(i = 0; i < argn; i++) {
-		req->params[i] = (char *) va_arg(ap, char *);
-	}
-}
-
-void start_client(char *addrport) {
-	// Get listening port
-	int lis_port = get_port_number(listen_sock);
-	char *ldr_addr_str = strtok(addrport, ":");
-	char *ldr_port_str = strtok(NULL, ":");
-	int ldr_port;
-	struct sockaddr_in ldr_addr;
-	Request req;
-	Response resp;
-
-	if(ldr_port_str == NULL) {
-		ldr_port = 80;
-	} else {
-		if(string_to_int(ldr_port_str, &ldr_port) < 0) {
-			perror("Invalid port number");
-			exit(EXIT_FAILURE);
-		}
-	}
-
-	printf("%s joining a new chat on %s:%d, listening on %s:%d\n",
-			username, ldr_addr_str, ldr_port, LOOPBACK_STR, lis_port);
-	// Send join request
-	ldr_addr = *make_sock_addr(ldr_addr_str, ldr_port);
-	req.req = "join";
-	encap_params(&req, 3, username, LOOPBACK_STR, int_to_string(lis_port));
-
-	if(send_request(ldr_addr, &req, &resp) < 0) {
-		printf("Sorry, no chat is active on %s:%d, try again later.\n",
-				ldr_addr_str, ldr_port);
-		printf("Bye.\n");
-		exit(EXIT_FAILURE);
-	}
-	if(resp.status < 0) {
-
-		printf("Failed to join chat on %s:%d.", ldr_addr_str, ldr_port);
-		if(resp.status == -2) {
-			printf("\nName already exists. Choose another name.");
-		}
-		printf("\n");
-		exit(EXIT_FAILURE);
-	}
-
-	decode_chatters(resp.body);
-	printf("Succeeded, current users:\n");
-	print_current_chatters();
-
-	start_input();
 }
 
 void *(listening_for_requests()) {
@@ -186,6 +195,7 @@ void *(listening_for_requests()) {
 	struct sockaddr_in r_addr;
 	while(1) {
 		if(recv_packet(listen_sock, &r_addr, &body) > 0) {
+//			printf("Body: %s\n", body);
 			if(parse_req_packet(body, &req) < 0) {
 				printf("Cannot parse packet body: %s\n", body);
 				continue;
@@ -201,8 +211,10 @@ void *(listening_for_requests()) {
 }
 
 void handle_request(const Request req, Response *resp) {
-	if(strcmp(req.req, "join") == 0) { // New chatter joining
+	if(strcmp(req.req, REQ_JOIN) == 0) { // New chatter joining
 		handle_join(req, resp);
+	} else if(strcmp(req.req, REQ_MESSAGE) == 0) { // Sending message
+		handle_message(req, resp);
 	}
 }
 
@@ -211,6 +223,7 @@ void handle_join(const Request req, Response *resp) {
 	time_t t;
 	char *msg;
 	char *name;
+	char bc_msg[100];
 
 	name = req.params[0];
 	if(check_duplicate_name(name)) {
@@ -233,6 +246,19 @@ void handle_join(const Request req, Response *resp) {
 
 	resp->status = 0;
 	resp->body = msg;
+
+	sprintf(bc_msg, "NOTICE %s joined on %s:%d",
+			new_ctr.name, new_ctr.host, new_ctr.port);
+	add_broadcast(bc_msg);
+}
+
+void handle_message(const Request req, Response *resp) {
+	char *msg;
+
+	resp->status = 0;
+	resp->body = NULL;
+	msg = get_message_string(req.params[0], req.params[1]);
+	add_broadcast(msg);
 }
 
 char check_duplicate_name(const char *name) {
@@ -245,25 +271,36 @@ char check_duplicate_name(const char *name) {
 	return 0;
 }
 
-void send_broadcast(char *bc) {
-	broadcast_msg = bc;
+void add_broadcast(char *bc) {
+	int len = strlen(bc);
+	broadcast_msg = (char *) malloc(sizeof(char) * (len + 1));
+	strncpy(broadcast_msg, bc, len);
 }
 
 void process_broadcast() {
+	struct sockaddr_in addr;
+	Request req;
+	Response resp;
+	Chatter chatter;
+	int i;
+
 	if(broadcast_msg == NULL) {
 		return;
 	}
-}
-
-void print_current_chatters() {
-	int i;
-	Chatter chatter;
+	req.req = REQ_BROADCAST;
+	encap_params(&req, 1, broadcast_msg);
 
 	for(i = 0; i < nchatters; i++) {
 		chatter = chatters[i];
-		printf("%s %s:%d%s\n", chatter.name, chatter.host,
-				chatter.port, chatter.leader ? " (Leader)" : "");
+		if(chatter.leader) { // Print message directly
+			printf("%s\n", broadcast_msg);
+		} else {
+			addr = *make_sock_addr(chatter.host, chatter.port);
+			send_request(addr, &req, &resp);
+		}
 	}
+
+	broadcast_msg = NULL;
 }
 
 int encode_chatters(char **res) {
@@ -292,6 +329,58 @@ int encode_chatters(char **res) {
 	buf[len] = '\0';
 	*res = buf;
 	return len;
+}
+
+void start_client(char *addrport) {
+	// Get listening port
+	int lis_port = get_port_number(listen_sock);
+	char *ldr_addr_str = strtok(addrport, ":");
+	char *ldr_port_str = strtok(NULL, ":");
+	int ldr_port;
+	Request req;
+	Response resp;
+
+	if(ldr_port_str == NULL) {
+		ldr_port = 80;
+	} else {
+		if(string_to_int(ldr_port_str, &ldr_port) < 0) {
+			perror("Invalid port number");
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	printf("%s joining a new chat on %s:%d, listening on %s:%d\n",
+			username, ldr_addr_str, ldr_port, LOOPBACK_STR, lis_port);
+	// Send join request
+	leader_addr = make_sock_addr(ldr_addr_str, ldr_port);
+	req.req = REQ_JOIN;
+	encap_params(&req, 3, username, LOOPBACK_STR, int_to_string(lis_port));
+
+	if(send_request(*leader_addr, &req, &resp) < 0) {
+		printf("Sorry, no chat is active on %s:%d, try again later.\n",
+				ldr_addr_str, ldr_port);
+		printf("Bye.\n");
+		exit(EXIT_FAILURE);
+	}
+	if(resp.status < 0) {
+
+		printf("Failed to join chat on %s:%d.", ldr_addr_str, ldr_port);
+		if(resp.status == -2) {
+			printf("\nName already exists. Choose another name.");
+		}
+		printf("\n");
+		exit(EXIT_FAILURE);
+	}
+
+	decode_chatters(resp.body);
+	printf("Succeeded, current users:\n");
+	print_current_chatters();
+
+	// Start listening thread
+	pthread_create(&listen_thread, NULL, listening_for_broadcasts, NULL);
+//	pthread_join(listen_thread, NULL);
+
+	start_input();
 }
 
 int decode_chatters(char *msg) {
@@ -335,6 +424,36 @@ Chatter * decode_chatter(char *line) {
 	return chatter;
 }
 
-void start_input() {
+void *(listening_for_broadcasts()) {
+	char *body;
+	Request req;
+	Response resp;
+	struct sockaddr_in r_addr;
+	while(1) {
+		if(recv_packet(listen_sock, &r_addr, &body) > 0) {
+//			printf("Body: %s\n", body);
+			if(parse_req_packet(body, &req) < 0) {
+				printf("Cannot parse packet body: %s\n", body);
+				continue;
+			}
+			handle_broadcast(req, &resp);
+			resp.ack = req.seq; // Set ack to request's seq
+			send_response(r_addr, &resp); // Send response
+		} else {
+			perror("recv_packet");
+		}
+	}
+}
 
+void handle_broadcast(const Request req, Response *resp) {
+	char *msg;
+	if(strcmp(req.req, REQ_BROADCAST) != 0) {
+		perror("Not broadcast request");
+		return;
+	}
+	msg = req.params[0];
+	printf("%s\n", msg); // Print broadcast message
+
+	resp->status = 0;
+	resp->body = NULL;
 }
