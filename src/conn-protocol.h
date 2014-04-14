@@ -284,17 +284,23 @@ int parse_req_packet(char *body, Request *req) {
 
 /* Parse the packet body into response structure.
  * Returns -1 if fails */
-int parse_resp_packet(char *body, Response *resp) {
+int parse_resp_packet(const char *body, Response *resp) {
 	char *tok;
 	char *msg;
 	int seq, ack;
 	int start = 0;
 	int len;
+	int l;
+	char *parse;
 
 	if(resp == NULL) {
 		return -1;
 	}
-	tok = strtok(body, LF);
+	l = strlen(body);
+	parse = (char *) malloc(sizeof(char) + (l + 1));
+	strncpy(parse, body, l);
+
+	tok = strtok(parse, LF);
 	start += strlen(tok) + strlen(LF);
 	if(strcmp(tok, PROTOCOL_NAME) != 0) {
 		perror("Wrong protocol");
@@ -317,7 +323,7 @@ int parse_resp_packet(char *body, Response *resp) {
 	resp->ack = ack;
 	start += strlen(LF);
 
-	msg = body + start;
+	msg = parse + start;
 	if(*msg) {
 		tok = strtok(NULL, LF);
 		start += strlen(tok) + strlen(LF);
@@ -326,7 +332,7 @@ int parse_resp_packet(char *body, Response *resp) {
 			return -1;
 		}
 
-		len = strlen(body) - start;
+		len = l - start;
 		if(len > 0) {
 			msg = (char *) malloc(sizeof(char) * (len + 1));
 			strncpy(msg, body + start, len);
@@ -354,6 +360,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	seq = local_seq++;
 	req->seq = seq;
 	len = compose_req_msg(*req, &msg);
+//	printf("Request:\n----\n%s\n----\n", msg);
 	if(len < 0) {
 		perror("compose_req_msg");
 		return -1;
@@ -371,9 +378,9 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	if(parse_resp_packet(resp_body, resp) < 0) {
 		return -3;
 	}
+//	printf("Response:\n----\n%s\n----\n", resp_body);
 	if(seq != resp->ack) {
 		perror("Ack number does not match");
-//		printf("Response:\nlength: %d\n----\n%s\n----\n", nbytes, resp_body);
 		return -4;
 	}
 	shutdown(sock, 0); // Close socket

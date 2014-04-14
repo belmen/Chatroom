@@ -12,9 +12,10 @@
 
 #define CHATTER_LIMIT 500
 #define REQ_JOIN "join"
-#define REQ_BROADCAST "broadcast"
+//#define REQ_BROADCAST "broadcast"
 #define REQ_MESSAGE "message"
 #define REQ_QUIT "quit"
+//#define REQ_NOTICE "notice"
 
 typedef struct chatter {
 	char *name;
@@ -26,12 +27,13 @@ typedef struct chatter {
 
 void help();
 char check_duplicate_name(const char *);
+void send_quit();
 void start_leader();
 void start_client(char *);
 void *(listening_for_requests());
 void print_current_chatters();
 void process_broadcast();
-void add_broadcast(char *);
+void add_broadcast(const char *req, const int paramc, ...);
 void handle_request(const Request, Response *);
 void handle_join(const Request, Response *);
 void handle_message(const Request, Response *);
@@ -41,12 +43,13 @@ Chatter * decode_chatter(char *);
 void start_input();
 void *(listening_for_broadcasts());
 void handle_broadcast(const Request, Response *);
+void handle_bc_join(const Request, Response *);
 
 Chatter chatters[CHATTER_LIMIT]; // Chatters array
 int nchatters = 0;
 struct sockaddr_in listen_addr; // Listening address
 int listen_sock; // Listening socket
-char *broadcast_msg;// Broadcast message
+Request *broadcast_req; // Broadcast request
 pthread_t listen_thread; // Listening thread
 struct sockaddr_in *leader_addr; // Leader's address
 
@@ -132,8 +135,11 @@ void start_input() {
 	Request req;
 	Response resp;
 	int len;
+
 	while(1) {
-		getline(&input, &size, stdin);
+		if(getline(&input, &size, stdin) < 0) { // EOF
+			break;
+		}
 		len = strlen(input);
 		if(len > 0) {
 			input[len - 1] = '\0'; // Remove new line
@@ -141,14 +147,37 @@ void start_input() {
 		if(strlen(input) == 0) {
 			continue;
 		}
-		if(leader) {
-			add_broadcast(get_message_string(username, input));
+		if(strcmp(input, ":users") == 0) {
+			printf("Current users:\n");
+			print_current_chatters();
+		} else if(leader) {
+			add_broadcast(REQ_MESSAGE, 2, username, input);
 			process_broadcast();
 		} else {
 			req.req = REQ_MESSAGE;
 			encap_params(&req, 2, username, input);
 			send_request(*leader_addr, &req, &resp);
 		}
+	}
+
+	// Send exit request
+	send_quit();
+	// Cancel running threads
+	pthread_cancel(listen_thread);
+	exit(EXIT_SUCCESS);
+}
+
+void send_quit() {
+	Request req;
+	Response resp;
+
+	if(leader) {
+		add_broadcast(REQ_QUIT, 2, username, "l");
+		process_broadcast();
+	} else {
+		req.req = REQ_QUIT;
+		encap_params(&req, 2, username, "c");
+		send_request(*leader_addr, &req, &resp);
 	}
 }
 
@@ -219,46 +248,46 @@ void handle_request(const Request req, Response *resp) {
 }
 
 void handle_join(const Request req, Response *resp) {
-	Chatter new_ctr;
+	Chatter *new_ctr = &chatters[nchatters];
 	time_t t;
 	char *msg;
 	char *name;
-	char bc_msg[100];
 
 	name = req.params[0];
 	if(check_duplicate_name(name)) {
-		resp->status = -2;
-		resp->body = NULL;
+		if(resp != NULL) {
+			resp->status = -2;
+			resp->body = NULL;
+		}
 		return;
 	}
 
-	new_ctr.name = name;
-	new_ctr.host = req.params[1];
-	if(string_to_int(req.params[2], &new_ctr.port) < 0) {
+	new_ctr->name = name;
+	new_ctr->host = req.params[1];
+	if(string_to_int(req.params[2], &new_ctr->port) < 0) {
 		perror("Invalid port");
-		return;
 	}
-	new_ctr.leader = 0;
+	new_ctr->leader = 0;
 	time(&t);
-	new_ctr.last_hb = t;
-	chatters[nchatters++] = new_ctr;
+	new_ctr->last_hb = t;
+	nchatters++;
 	encode_chatters(&msg);
 
-	resp->status = 0;
-	resp->body = msg;
+	if(resp != NULL) {
+		resp->status = 0;
+		resp->body = msg;
+	}
 
-	sprintf(bc_msg, "NOTICE %s joined on %s:%d",
-			new_ctr.name, new_ctr.host, new_ctr.port);
-	add_broadcast(bc_msg);
+	add_broadcast(REQ_JOIN, 3, new_ctr->name,
+			new_ctr->host, int_to_string(new_ctr->port));
 }
 
 void handle_message(const Request req, Response *resp) {
-	char *msg;
-
-	resp->status = 0;
-	resp->body = NULL;
-	msg = get_message_string(req.params[0], req.params[1]);
-	add_broadcast(msg);
+	if(resp != NULL) {
+		resp->status = 0;
+		resp->body = NULL;
+	}
+	add_broadcast(REQ_MESSAGE, 2, req.params[0], req.params[1]);
 }
 
 char check_duplicate_name(const char *name) {
@@ -271,36 +300,42 @@ char check_duplicate_name(const char *name) {
 	return 0;
 }
 
-void add_broadcast(char *bc) {
-	int len = strlen(bc);
-	broadcast_msg = (char *) malloc(sizeof(char) * (len + 1));
-	strncpy(broadcast_msg, bc, len);
+void add_broadcast(const char *req, const int paramc, ...) {
+	va_list ap;
+	int i;
+
+	va_start(ap, paramc);
+	broadcast_req = (Request *) malloc(sizeof(Request));
+	broadcast_req->req = (char *) malloc(sizeof(char) * (strlen(req) + 1));
+	strncpy(broadcast_req->req, req, strlen(req));
+	broadcast_req->paramsn = paramc;
+	broadcast_req->params = (char **) malloc(sizeof(char *) * paramc);
+	for(i = 0; i < paramc; i++) {
+		broadcast_req->params[i] = (char *) va_arg(ap, char *);
+	}
 }
 
 void process_broadcast() {
 	struct sockaddr_in addr;
-	Request req;
 	Response resp;
 	Chatter chatter;
 	int i;
 
-	if(broadcast_msg == NULL) {
+	if(broadcast_req == NULL) {
 		return;
 	}
-	req.req = REQ_BROADCAST;
-	encap_params(&req, 1, broadcast_msg);
 
 	for(i = 0; i < nchatters; i++) {
 		chatter = chatters[i];
 		if(chatter.leader) { // Print message directly
-			printf("%s\n", broadcast_msg);
+			handle_broadcast(*broadcast_req, NULL);
 		} else {
 			addr = *make_sock_addr(chatter.host, chatter.port);
-			send_request(addr, &req, &resp);
+			send_request(addr, broadcast_req, &resp);
 		}
 	}
 
-	broadcast_msg = NULL;
+	broadcast_req = NULL;
 }
 
 int encode_chatters(char **res) {
@@ -446,14 +481,55 @@ void *(listening_for_broadcasts()) {
 }
 
 void handle_broadcast(const Request req, Response *resp) {
-	char *msg;
-	if(strcmp(req.req, REQ_BROADCAST) != 0) {
-		perror("Not broadcast request");
-		return;
-	}
-	msg = req.params[0];
-	printf("%s\n", msg); // Print broadcast message
+	if(strcmp(req.req, REQ_JOIN) == 0) { // Someone joined
+		handle_bc_join(req, resp);
+	} else if(strcmp(req.req, REQ_MESSAGE) == 0) { // Someone send msg
+		printf("%s: %s\n", req.params[0], req.params[1]);
+		if(resp != NULL) {
+			resp->status = 0;
+			resp->body = NULL;
+		}
+	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Some quit
 
-	resp->status = 0;
-	resp->body = NULL;
+	}
+
+//	char *msg;
+//	if(strcmp(req.req, REQ_BROADCAST) != 0) {
+//		perror("Not broadcast request");
+//		return;
+//	}
+//	msg = req.params[0];
+//	printf("%s\n", msg); // Print broadcast message
+//
+//	if(resp != NULL) {
+//		resp->status = 0;
+//		resp->body = NULL;
+//	}
+}
+
+void handle_bc_join(const Request req, Response *resp) {
+	Chatter *new_ctr;
+	char *name = req.params[0];
+	char *host = req.params[1];
+	int port;
+	if(string_to_int(req.params[2], &port) < 0) {
+		perror("Invalid port number");
+	}
+
+	if(leader == 0 && strcmp(name, username) != 0) {
+		// Other new chatters
+		new_ctr = &chatters[nchatters++];
+		new_ctr->name = name;
+		new_ctr->host = host;
+		new_ctr->port = port;
+		new_ctr->leader = 0;
+		new_ctr->last_hb = 0;
+	}
+	if(resp != NULL) {
+		resp->status = 0;
+		resp->body = NULL;
+	}
+
+
+	printf("NOTICE %s joined on %s:%d\n", name, host, port);
 }
