@@ -193,11 +193,9 @@ void *(listening_for_requests()) {
 	Request req;
 	Response resp;
 	struct sockaddr_in r_addr;
-	char buf[BUFFER_SIZE];
 
 	while(1) {
-		if(recv_packet(listen_sock, buf, BUFFER_SIZE, &r_addr, &body) > 0) {
-//			printf("Body: %s\n", body);
+		if(recv_packet(listen_sock, &r_addr, &body) > 0) {
 			if(parse_req_packet(body, &req) < 0) {
 				printf("Cannot parse packet body: %s\n", body);
 				continue;
@@ -431,10 +429,9 @@ void *(listening_for_broadcasts()) {
 	Request req;
 	Response resp;
 	struct sockaddr_in r_addr;
-	char buf[BUFFER_SIZE];
 
 	while(1) {
-		if(recv_packet(listen_sock, buf, BUFFER_SIZE, &r_addr, &body) > 0) {
+		if(recv_packet(listen_sock, &r_addr, &body) > 0) {
 			if(parse_req_packet(body, &req) < 0) {
 				printf("Cannot parse packet body: %s\n", body);
 				continue;

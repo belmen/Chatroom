@@ -11,7 +11,7 @@
 #define PROTOCOL_NAME "chatroom-0.1"
 #define LF "\n"
 
-//char buffer[BUFFER_SIZE];
+char buffer[BUFFER_SIZE];
 int local_seq = 0;
 int remote_seq;
 
@@ -215,20 +215,17 @@ int compose_broadcast_msg(const char *i_msg, char **o_msg) {
 
 /* Receive message from given socket. addr outputs the remote address,
  * body_p outputs the packet body. Returns the number of bytes read */
-int recv_packet(int sock, char *buf, size_t size,
-		struct sockaddr_in *addr, char **body_p) {
-//	char buffer[BUFFER_SIZE];
+int recv_packet(int sock, struct sockaddr_in *addr, char **body_p) {
 	int nbytes;
 	char *body;
-//	socklen_t size = (socklen_t) sizeof(struct sockaddr_in);
-	nbytes = recvfrom(sock, buf, size, 0,
+	socklen_t size = (socklen_t) sizeof(struct sockaddr_in);
+	nbytes = recvfrom(sock, buffer, BUFFER_SIZE, 0,
 			(struct sockaddr *) addr, &size);
 	if(nbytes > 0) {
 		body = (char *) malloc(sizeof(char) * (nbytes + 1));
-		strncpy(body, buf, nbytes);
+		strncpy(body, buffer, nbytes);
 		body[nbytes] = '\0';
 		*body_p = body;
-//		printf("Received:\n----\n%s\n----\n", body);
 	}
 	return nbytes;
 }
@@ -350,7 +347,6 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	char *resp_body = NULL;
 	int len;
 	int nbytes;
-	char buf[BUFFER_SIZE];
 	int seq;
 
 	sock = make_req_socket();
@@ -362,7 +358,6 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 		perror("compose_req_msg");
 		return -1;
 	}
-//	printf("Send request:\nlength: %d\n----\n%s\n----\n", len, msg);
 	// Send message
 	nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
 			(socklen_t) sizeof(struct sockaddr_in));
@@ -370,7 +365,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 		return -1;
 	}
 	// Wait for response or ack
-	if(recv_packet(sock, buf, BUFFER_SIZE, &r_addr, &resp_body) < 0) {
+	if(recv_packet(sock, &r_addr, &resp_body) < 0) {
 		return -2;
 	}
 	if(parse_resp_packet(resp_body, resp) < 0) {
