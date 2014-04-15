@@ -460,6 +460,7 @@ int decode_chatters(const char *msg) {
 	parse = (char *) malloc(sizeof(char) * (len + 1));
 	strncpy(parse, msg, len);
 	tok = strtok(parse, LF);
+	n = 0;
 	while(tok != NULL) {
 		lines[n++] = tok;
 		tok = strtok(NULL, LF);
