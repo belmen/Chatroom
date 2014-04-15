@@ -40,7 +40,7 @@ void handle_message(const Request, Response *);
 void handle_quit(const Request, Response *);
 int encode_chatters(char **);
 int decode_chatters(const char *);
-Chatter * decode_chatter(const char *);
+void decode_chatter(const char *, Chatter *);
 void start_input();
 void *(listening_for_broadcasts());
 void handle_broadcast(const Request, Response *);
@@ -453,10 +453,8 @@ int decode_chatters(const char *msg) {
 	char *parse;
 	char *tok;
 	char *lines[CHATTER_LIMIT];
-	char *line;
 	int n, i;
 	int len;
-	Chatter *chatter;
 
 	len = strlen(msg);
 	parse = (char *) malloc(sizeof(char) * (len + 1));
@@ -469,34 +467,31 @@ int decode_chatters(const char *msg) {
 
 	nchatters = n;
 	for(i = 0; i < n; i++) {
-		line = lines[i];
-		chatter = decode_chatter(line);
-		chatters[i] = *chatter;
+		decode_chatter(lines[i], &chatters[i]);
 	}
 
+	free(parse);
+	parse = NULL;
 	return 0;
 }
 
 /* Decode single chatter */
-Chatter * decode_chatter(const char *line) {
+void decode_chatter(const char *line, Chatter *p_chatter) {
 	char *parse;
 	char *tok;
-	Chatter *chatter = (Chatter *) malloc(sizeof(Chatter));
 	int len = strlen(line);
 
 	parse = (char *) malloc(sizeof(char) * (len + 1));
 	strncpy(parse, line, len);
-	chatter->name = strtok(parse, "\t");
-	chatter->host = strtok(NULL, "\t");
-	string_to_int(strtok(NULL, "\t"), &chatter->port);
+	p_chatter->name = strtok(parse, "\t");
+	p_chatter->host = strtok(NULL, "\t");
+	string_to_int(strtok(NULL, "\t"), &p_chatter->port);
 	tok = strtok(NULL, "\t");
 	if(strcmp(tok, "l") == 0) { // Is leader
-		chatter->leader = 1;
+		p_chatter->leader = 1;
 	} else {
-		chatter->leader = 0;
+		p_chatter->leader = 0;
 	}
-
-	return chatter;
 }
 
 /* Thread handler for clients to listen for broadcast message */
