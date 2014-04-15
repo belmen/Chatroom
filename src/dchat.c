@@ -39,8 +39,8 @@ void handle_join(const Request, Response *);
 void handle_message(const Request, Response *);
 void handle_quit(const Request, Response *);
 int encode_chatters(char **);
-int decode_chatters(char *);
-Chatter * decode_chatter(char *);
+int decode_chatters(const char *);
+Chatter * decode_chatter(const char *);
 void start_input();
 void *(listening_for_broadcasts());
 void handle_broadcast(const Request, Response *);
@@ -449,15 +449,19 @@ void start_client(char *addrport) {
 }
 
 /* Decode chatters list from packet message */
-int decode_chatters(char *msg) {
-	char *buf = msg;
+int decode_chatters(const char *msg) {
+	char *parse;
 	char *tok;
 	char *lines[CHATTER_LIMIT];
 	char *line;
 	int n, i;
+	int len;
 	Chatter *chatter;
 
-	tok = strtok(buf, LF);
+	len = strlen(msg);
+	parse = (char *) malloc(sizeof(char) * (len + 1));
+	strncpy(parse, msg, len);
+	tok = strtok(parse, LF);
 	while(tok != NULL) {
 		lines[n++] = tok;
 		tok = strtok(NULL, LF);
@@ -469,16 +473,20 @@ int decode_chatters(char *msg) {
 		chatter = decode_chatter(line);
 		chatters[i] = *chatter;
 	}
+
 	return 0;
 }
 
 /* Decode single chatter */
-Chatter * decode_chatter(char *line) {
-	char *buf = line;
+Chatter * decode_chatter(const char *line) {
+	char *parse;
 	char *tok;
 	Chatter *chatter = (Chatter *) malloc(sizeof(Chatter));
+	int len = strlen(line);
 
-	chatter->name = strtok(buf, "\t");
+	parse = (char *) malloc(sizeof(char) * (len + 1));
+	strncpy(parse, line, len);
+	chatter->name = strtok(parse, "\t");
 	chatter->host = strtok(NULL, "\t");
 	string_to_int(strtok(NULL, "\t"), &chatter->port);
 	tok = strtok(NULL, "\t");
