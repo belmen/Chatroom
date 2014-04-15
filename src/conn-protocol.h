@@ -15,14 +15,14 @@ char buffer[BUFFER_SIZE];
 int local_seq = 0;
 int remote_seq;
 
-typedef struct cli_request {
+typedef struct request_pkt {
 	int seq;
 	char *req;
-	char **params;
-	int paramsn;
+	char **param;
+	int paramc;
 } Request;
 
-typedef struct cli_response {
+typedef struct response_pkt {
 	int seq;
 	int ack;
 	int status;
@@ -135,8 +135,8 @@ int compose_req_msg(const Request req, char **msg_o) {
 	len += strlen(seq_str) + strlen(LF);
 	len += strlen(LF);
 	len += strlen(req.req);
-	for(i = 0; i < req.paramsn; i++) {
-		len += strlen(LF) + strlen(req.params[i]);
+	for(i = 0; i < req.paramc; i++) {
+		len += strlen(LF) + strlen(req.param[i]);
 	}
 
 	msg = (char *) malloc(sizeof(char) * (len + 1));
@@ -146,15 +146,17 @@ int compose_req_msg(const Request req, char **msg_o) {
 	strcat(msg, LF);
 	strcat(msg, LF);
 	strcat(msg, req.req);
-	for(i = 0; i < req.paramsn; i++) {
+	for(i = 0; i < req.paramc; i++) {
 		strcat(msg, LF);
-		strcat(msg, req.params[i]);
+		strcat(msg, req.param[i]);
 	}
 	msg[len] = '\0';
 	*msg_o = msg;
 	return len;
 }
 
+/* Compose given response into packet message.
+ * msg_o outputs the message. Returns length of the message */
 int compose_resp_msg(const Response resp, char **msg_o) {
 	int len = 0;
 	char *seq_str;
@@ -191,25 +193,6 @@ int compose_resp_msg(const Response resp, char **msg_o) {
 	}
 	msg[len] = '\0';
 	*msg_o = msg;
-	return len;
-}
-
-int compose_broadcast_msg(const char *i_msg, char **o_msg) {
-	int len = 0;
-	char *msg;
-
-	// Calculate msg length
-	len += strlen(PROTOCOL_NAME) + strlen(LF);
-	len += strlen(LF);
-	len += strlen(i_msg);
-
-	msg = (char *) malloc(sizeof(char) * (len + 1));
-	strcat(msg, PROTOCOL_NAME);
-	strcat(msg, LF);
-	strcat(msg, LF);
-	strcat(msg, i_msg);
-	msg[len] = '\0';
-	*o_msg = msg;
 	return len;
 }
 
@@ -273,10 +256,10 @@ int parse_req_packet(char *body, Request *req) {
 				lines++;
 			}
 		}
-		req->paramsn = lines;
-		req->params = (char **) malloc(sizeof(char *) * lines);
+		req->paramc = lines;
+		req->param = (char **) malloc(sizeof(char *) * lines);
 		for(i = 0; i < lines; i++) {
-			req->params[i] = strtok(NULL, LF);
+			req->param[i] = strtok(NULL, LF);
 		}
 	}
 	return 0;
@@ -345,7 +328,8 @@ int parse_resp_packet(const char *body, Response *resp) {
 }
 
 /* Send a request with available socket.
- *  */
+ * Returns -1 if sending fails, -2 if receiving timeout,
+ * -3 if cannot parse response, -4 if ACK number not match*/
 int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	int sock;
 	struct sockaddr_in r_addr;
@@ -356,7 +340,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	int seq;
 
 	sock = make_req_socket();
-//	set_recv_timeout(sock, RECV_TIMEOUT);
+	set_recv_timeout(sock, RECV_TIMEOUT);
 	seq = local_seq++;
 	req->seq = seq;
 	len = compose_req_msg(*req, &msg);
@@ -395,7 +379,7 @@ int send_response(const struct sockaddr_in addr, Response *resp) {
 	int seq;
 
 	sock = make_req_socket();
-	//	set_recv_timeout(sock, RECV_TIMEOUT);
+	set_recv_timeout(sock, RECV_TIMEOUT);
 	seq = local_seq++;
 	resp->seq = seq;
 	len = compose_resp_msg(*resp, &msg);

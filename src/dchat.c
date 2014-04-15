@@ -12,10 +12,8 @@
 
 #define CHATTER_LIMIT 500
 #define REQ_JOIN "join"
-//#define REQ_BROADCAST "broadcast"
 #define REQ_MESSAGE "message"
 #define REQ_QUIT "quit"
-//#define REQ_NOTICE "notice"
 
 typedef struct chatter {
 	char *name;
@@ -28,6 +26,8 @@ typedef struct chatter {
 void help();
 char check_duplicate_name(const char *);
 void send_quit();
+void quit_chatroom();
+void remove_user(const char *);
 void start_leader();
 void start_client(char *);
 void *(listening_for_requests());
@@ -37,6 +37,7 @@ void add_broadcast(const char *req, const int paramc, ...);
 void handle_request(const Request, Response *);
 void handle_join(const Request, Response *);
 void handle_message(const Request, Response *);
+void handle_quit(const Request, Response *);
 int encode_chatters(char **);
 int decode_chatters(char *);
 Chatter * decode_chatter(char *);
@@ -44,6 +45,8 @@ void start_input();
 void *(listening_for_broadcasts());
 void handle_broadcast(const Request, Response *);
 void handle_bc_join(const Request, Response *);
+void handle_bc_message(const Request, Response *);
+void handle_bc_quit(const Request, Response *);
 
 Chatter chatters[CHATTER_LIMIT]; // Chatters array
 int nchatters = 0;
@@ -88,6 +91,10 @@ int main(int argc, char *argv[]) {
 	listen_addr = *make_sock_addr(LOOPBACK_STR, l_port);
 	listen_sock = create_socket(listen_addr);
 
+	printf("--- Welcome to Distributed Chatroom! ---\n");
+	printf("Help: Type \":users\" to list current chatters,");
+	printf(" press Ctrl+D to quit.\n\n");
+
 	if(leader) {
 		start_leader();
 	} else {
@@ -100,7 +107,8 @@ void help() {
 	printf("dchat NAME [ADDR:PORT]\n");
 }
 
-void encap_params(Request *req, int argn, ...) {
+/* Encapsule parameters into request */
+void encap_param(Request *req, int argn, ...) {
 	va_list ap;
 	int i;
 
@@ -108,27 +116,14 @@ void encap_params(Request *req, int argn, ...) {
 		return;
 	}
 	va_start(ap, argn);
-	req->paramsn = argn;
-	req->params = (char **) malloc(sizeof(char *) * argn);
+	req->paramc = argn;
+	req->param = (char **) malloc(sizeof(char *) * argn);
 	for(i = 0; i < argn; i++) {
-		req->params[i] = (char *) va_arg(ap, char *);
+		req->param[i] = (char *) va_arg(ap, char *);
 	}
 }
 
-char * get_message_string(const char *name, const char *msg) {
-	char *res;
-	int len = 0;
-	len += strlen(name);
-	len += strlen(": ");
-	len += strlen(msg);
-	res = (char *) malloc(sizeof(char) * (len + 1));
-	strcat(res, name);
-	strcat(res, ": ");
-	strcat(res, msg);
-	res[len] = '\0';
-	return res;
-}
-
+/* Start monitoring input from console */
 void start_input() {
 	char *input = NULL;
 	size_t size;
@@ -147,40 +142,56 @@ void start_input() {
 		if(strlen(input) == 0) {
 			continue;
 		}
-		if(strcmp(input, ":users") == 0) {
+		if(strcmp(input, ":users") == 0) { // List users
 			printf("Current users:\n");
 			print_current_chatters();
+		} else if(strcmp(input, ":quit") == 0) {
+			break;
 		} else if(leader) {
 			add_broadcast(REQ_MESSAGE, 2, username, input);
 			process_broadcast();
 		} else {
 			req.req = REQ_MESSAGE;
-			encap_params(&req, 2, username, input);
+			encap_param(&req, 2, username, input);
 			send_request(*leader_addr, &req, &resp);
 		}
 	}
 
 	// Send exit request
 	send_quit();
+
+	quit_chatroom();
+}
+
+/* Quit chatroom */
+void quit_chatroom() {
 	// Cancel running threads
 	pthread_cancel(listen_thread);
 	exit(EXIT_SUCCESS);
 }
 
+/* Send quit message to others */
 void send_quit() {
 	Request req;
 	Response resp;
 
+	/*
+	 * Param1: name
+	 * Param2: leader : "l", client: "c"
+	 * Param3: Normal exit: "1", crashed: "0"
+	 */
 	if(leader) {
-		add_broadcast(REQ_QUIT, 2, username, "l");
+		add_broadcast(REQ_QUIT, 3, username, "l", "1");
 		process_broadcast();
 	} else {
+		// No param 3
 		req.req = REQ_QUIT;
-		encap_params(&req, 2, username, "c");
+		encap_param(&req, 1, username);
 		send_request(*leader_addr, &req, &resp);
 	}
 }
 
+/* Start the leader chatter */
 void start_leader() {
 	Chatter leader;
 	// Get listening port
@@ -201,11 +212,11 @@ void start_leader() {
 	printf("Waiting for others to join...\n");
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
-//	pthread_join(listen_thread, NULL);
 
 	start_input();
 }
 
+/* Print current chatters to the console */
 void print_current_chatters() {
 	int i;
 	Chatter chatter;
@@ -217,12 +228,15 @@ void print_current_chatters() {
 	}
 }
 
+/* Thread handler for leader to listen for incoming requests */
 void *(listening_for_requests()) {
 	char *body = NULL;
 	Request req;
 	Response resp;
 	struct sockaddr_in r_addr;
 
+	resp.status = 0;
+	resp.body = NULL;
 	while(1) {
 		if(recv_packet(listen_sock, &r_addr, &body) > 0) {
 			if(parse_req_packet(body, &req) < 0) {
@@ -239,21 +253,25 @@ void *(listening_for_requests()) {
 	}
 }
 
+/* Handle incoming requests */
 void handle_request(const Request req, Response *resp) {
 	if(strcmp(req.req, REQ_JOIN) == 0) { // New chatter joining
 		handle_join(req, resp);
 	} else if(strcmp(req.req, REQ_MESSAGE) == 0) { // Sending message
 		handle_message(req, resp);
+	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Quit
+		handle_quit(req, resp);
 	}
 }
 
+/* Handle join request */
 void handle_join(const Request req, Response *resp) {
 	Chatter *new_ctr = &chatters[nchatters];
 	time_t t;
 	char *msg;
 	char *name;
 
-	name = req.params[0];
+	name = req.param[0];
 	if(check_duplicate_name(name)) {
 		if(resp != NULL) {
 			resp->status = -2;
@@ -263,8 +281,8 @@ void handle_join(const Request req, Response *resp) {
 	}
 
 	new_ctr->name = name;
-	new_ctr->host = req.params[1];
-	if(string_to_int(req.params[2], &new_ctr->port) < 0) {
+	new_ctr->host = req.param[1];
+	if(string_to_int(req.param[2], &new_ctr->port) < 0) {
 		perror("Invalid port");
 	}
 	new_ctr->leader = 0;
@@ -272,9 +290,7 @@ void handle_join(const Request req, Response *resp) {
 	new_ctr->last_hb = t;
 	nchatters++;
 	encode_chatters(&msg);
-
 	if(resp != NULL) {
-		resp->status = 0;
 		resp->body = msg;
 	}
 
@@ -282,14 +298,20 @@ void handle_join(const Request req, Response *resp) {
 			new_ctr->host, int_to_string(new_ctr->port));
 }
 
+/* Handle message request */
 void handle_message(const Request req, Response *resp) {
-	if(resp != NULL) {
-		resp->status = 0;
-		resp->body = NULL;
-	}
-	add_broadcast(REQ_MESSAGE, 2, req.params[0], req.params[1]);
+	add_broadcast(REQ_MESSAGE, 2, req.param[0], req.param[1]);
 }
 
+/* Handle quit request */
+void handle_quit(const Request req, Response *resp) {
+	char *name = req.param[0];
+
+	remove_user(name);
+	add_broadcast(REQ_QUIT, 3, name, "c", "1");
+}
+
+/* Check if a name already exists in chatroom */
 char check_duplicate_name(const char *name) {
 	int i;
 	for(i = 0; i < nchatters; i++) {
@@ -300,6 +322,7 @@ char check_duplicate_name(const char *name) {
 	return 0;
 }
 
+/* Add broadcast message to process */
 void add_broadcast(const char *req, const int paramc, ...) {
 	va_list ap;
 	int i;
@@ -308,13 +331,14 @@ void add_broadcast(const char *req, const int paramc, ...) {
 	broadcast_req = (Request *) malloc(sizeof(Request));
 	broadcast_req->req = (char *) malloc(sizeof(char) * (strlen(req) + 1));
 	strncpy(broadcast_req->req, req, strlen(req));
-	broadcast_req->paramsn = paramc;
-	broadcast_req->params = (char **) malloc(sizeof(char *) * paramc);
+	broadcast_req->paramc = paramc;
+	broadcast_req->param = (char **) malloc(sizeof(char *) * paramc);
 	for(i = 0; i < paramc; i++) {
-		broadcast_req->params[i] = (char *) va_arg(ap, char *);
+		broadcast_req->param[i] = (char *) va_arg(ap, char *);
 	}
 }
 
+/* Send broadcast message to all clients */
 void process_broadcast() {
 	struct sockaddr_in addr;
 	Response resp;
@@ -338,6 +362,7 @@ void process_broadcast() {
 	broadcast_req = NULL;
 }
 
+/* Encode chatters list into packet format */
 int encode_chatters(char **res) {
 	char line[100];
 	char *buf = (char *) malloc(sizeof(char) * (nchatters * 100 + 1));
@@ -366,6 +391,7 @@ int encode_chatters(char **res) {
 	return len;
 }
 
+/* Start client chatter */
 void start_client(char *addrport) {
 	// Get listening port
 	int lis_port = get_port_number(listen_sock);
@@ -389,7 +415,7 @@ void start_client(char *addrport) {
 	// Send join request
 	leader_addr = make_sock_addr(ldr_addr_str, ldr_port);
 	req.req = REQ_JOIN;
-	encap_params(&req, 3, username, LOOPBACK_STR, int_to_string(lis_port));
+	encap_param(&req, 3, username, LOOPBACK_STR, int_to_string(lis_port));
 
 	if(send_request(*leader_addr, &req, &resp) < 0) {
 		printf("Sorry, no chat is active on %s:%d, try again later.\n",
@@ -398,7 +424,6 @@ void start_client(char *addrport) {
 		exit(EXIT_FAILURE);
 	}
 	if(resp.status < 0) {
-
 		printf("Failed to join chat on %s:%d.", ldr_addr_str, ldr_port);
 		if(resp.status == -2) {
 			printf("\nName already exists. Choose another name.");
@@ -413,11 +438,11 @@ void start_client(char *addrport) {
 
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_broadcasts, NULL);
-//	pthread_join(listen_thread, NULL);
 
 	start_input();
 }
 
+/* Decode chatters list from packet message */
 int decode_chatters(char *msg) {
 	char *buf = msg;
 	char *tok;
@@ -441,6 +466,7 @@ int decode_chatters(char *msg) {
 	return 0;
 }
 
+/* Decode single chatter */
 Chatter * decode_chatter(char *line) {
 	char *buf = line;
 	char *tok;
@@ -459,12 +485,15 @@ Chatter * decode_chatter(char *line) {
 	return chatter;
 }
 
+/* Thread handler for clients to listen for broadcast message */
 void *(listening_for_broadcasts()) {
 	char *body;
 	Request req;
 	Response resp;
 	struct sockaddr_in r_addr;
 
+	resp.status = 0;
+	resp.body = NULL;
 	while(1) {
 		if(recv_packet(listen_sock, &r_addr, &body) > 0) {
 			if(parse_req_packet(body, &req) < 0) {
@@ -480,39 +509,24 @@ void *(listening_for_broadcasts()) {
 	}
 }
 
+/* Handle received broadcast message */
 void handle_broadcast(const Request req, Response *resp) {
 	if(strcmp(req.req, REQ_JOIN) == 0) { // Someone joined
 		handle_bc_join(req, resp);
 	} else if(strcmp(req.req, REQ_MESSAGE) == 0) { // Someone send msg
-		printf("%s: %s\n", req.params[0], req.params[1]);
-		if(resp != NULL) {
-			resp->status = 0;
-			resp->body = NULL;
-		}
-	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Some quit
-
+		handle_bc_message(req, resp);
+	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Someone quit
+		handle_bc_quit(req, resp);
 	}
-
-//	char *msg;
-//	if(strcmp(req.req, REQ_BROADCAST) != 0) {
-//		perror("Not broadcast request");
-//		return;
-//	}
-//	msg = req.params[0];
-//	printf("%s\n", msg); // Print broadcast message
-//
-//	if(resp != NULL) {
-//		resp->status = 0;
-//		resp->body = NULL;
-//	}
 }
 
+/* Handle other chatter's joining event */
 void handle_bc_join(const Request req, Response *resp) {
 	Chatter *new_ctr;
-	char *name = req.params[0];
-	char *host = req.params[1];
+	char *name = req.param[0];
+	char *host = req.param[1];
 	int port;
-	if(string_to_int(req.params[2], &port) < 0) {
+	if(string_to_int(req.param[2], &port) < 0) {
 		perror("Invalid port number");
 	}
 
@@ -525,11 +539,49 @@ void handle_bc_join(const Request req, Response *resp) {
 		new_ctr->leader = 0;
 		new_ctr->last_hb = 0;
 	}
-	if(resp != NULL) {
-		resp->status = 0;
-		resp->body = NULL;
-	}
-
 
 	printf("NOTICE %s joined on %s:%d\n", name, host, port);
+}
+
+/* Handle message broadcast */
+void handle_bc_message(const Request req, Response *resp) {
+	printf("%s: %s\n", req.param[0], req.param[1]);
+}
+
+/* Handle other chatter's quit broadcast */
+void handle_bc_quit(const Request req, Response *resp) {
+	char *name = req.param[0]; // username
+	int is_leader = strcmp("l", req.param[1]) == 0 ? 1 : 0; // Leader: "l", others: "c"
+	int normal = strcmp("1", req.param[2]) == 0 ? 1 : 0;
+
+	if(leader == 0) {
+		remove_user(name);
+	}
+	printf("NOTICE %s%s left the chat%s\n", name, is_leader ? " (Leader)" : "",
+			normal ? "" : " or crashed");
+
+	if(is_leader && leader == 0) {
+		// TODO: Leader election
+		// Now we just quit
+		quit_chatroom();
+	}
+}
+
+/* Remove a chatter from chatter list */
+void remove_user(const char *name) {
+	int i;
+	int index = -1;
+	for(i = 0; i < nchatters; i++) {
+		if(strcmp(name, chatters[i].name) == 0) {
+			index = i;
+			break;
+		}
+	}
+	if(index == -1) {
+		return;
+	}
+	for(i = index; i + 1 < nchatters; i++) {
+		chatters[i] = chatters[i + 1];
+	}
+	nchatters--;
 }
