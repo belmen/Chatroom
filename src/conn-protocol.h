@@ -62,15 +62,24 @@ void set_recv_timeout(int sock, int to_sec) {
 }
 
 /* Create a socket address with givin host and port */
-struct sockaddr_in * make_sock_addr(const char *addr_name,
+struct sockaddr_in * make_sock_addr(const char *host,
 		const uint16_t port) {
 	struct sockaddr_in *addr;
+	char *addr_name = NULL;
+
+	if(host != NULL) {
+		addr_name = (char *) malloc(sizeof(char) * (strlen(host) + 1));
+		strcpy(addr_name, host);
+	}
 	addr = (struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
 	addr->sin_family = AF_INET;
 	addr->sin_port = htons(port);
 	if(addr_name == NULL) {
 		addr->sin_addr.s_addr = htonl(INADDR_ANY);
 	} else {
+		if(strcmp(addr_name, "localhost") == 0) {
+			addr_name = "127.0.0.1";
+		}
 		if(inet_pton(AF_INET, addr_name, &addr->sin_addr) < 0) {
 			perror("Invalid address name");
 			return NULL;

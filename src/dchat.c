@@ -107,6 +107,8 @@ void help() {
 	printf("dchat NAME [ADDR:PORT]\n");
 }
 
+/***** Common functions *****/
+
 /* Encapsule parameters into request */
 void encap_param(Request *req, int argn, ...) {
 	va_list ap;
@@ -190,6 +192,8 @@ void send_quit() {
 		send_request(*leader_addr, &req, &resp);
 	}
 }
+
+/***** Functions for leader *****/
 
 /* Start the leader chatter */
 void start_leader() {
@@ -390,6 +394,8 @@ int encode_chatters(char **res) {
 	*res = buf;
 	return len;
 }
+
+/***** Functions for clients *****/
 
 /* Start client chatter */
 void start_client(char *addrport) {
