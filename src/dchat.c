@@ -11,20 +11,16 @@
 #include "conn-protocol.h"
 
 
-//heartbeat head
+//heartbeat start
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <pthread.h>
 
 #include <signal.h>
 #include <unistd.h>
-#include <time.h>
-#include <errno.h>
-#include "conn-protocol.h"
-//heartbeat head
+//heartbeat end
 
-//heartbeat global
+//heartbeat global start
 #define HB_INTERVAL 5   //define time interval of heartbeat signal
 #define HB_ACK_BUF_SIZE 8192
 #define test_addr_str "127.0.0.1"
@@ -53,16 +49,7 @@ int heartbeat_seq = 0;//define heartbeat msg sequence number
 
 int ACK_MISS_CNT = 0;
 int isLeaderCrash = 0;
-//heartbeat global
-
-
-
-
-
-
-
-
-
+//heartbeat global end
 
 
 #define CHATTER_LIMIT 500
