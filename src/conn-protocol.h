@@ -6,7 +6,7 @@
 #include <arpa/inet.h>
 
 #define LOOPBACK_STR "127.0.0.1"
-#define RECV_TIMEOUT 3
+#define RECV_TIMEOUT 1
 #define BUFFER_SIZE 8192
 #define PROTOCOL_NAME "chatroom-0.1"
 #define LF "\n"
@@ -347,6 +347,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	int len;
 	int nbytes;
 	int seq;
+    int resend = 0;
 
 	sock = make_req_socket();
 	set_recv_timeout(sock, RECV_TIMEOUT);
@@ -359,15 +360,26 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 		return -1;
 	}
 	// Send message
-	nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
-			(socklen_t) sizeof(struct sockaddr_in));
-	if(nbytes < 0) {
-		return -1;
-	}
-	// Wait for response or ack
-	if(recv_packet(sock, &r_addr, &resp_body) < 0) {
-		return -2;
-	}
+    while (1) {
+        nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
+                (socklen_t) sizeof(struct sockaddr_in));
+        if(nbytes < 0) {
+            return -1;
+        }
+        // Wait for response or ack
+        if(recv_packet(sock, &r_addr, &resp_body) < 0 && resend < 3) {
+            printf("Timout reached. Resending segment\n");
+            //return -2;
+        }
+        else if (recv_packet(sock, &r_addr, &resp_body) < 0 && resend >= 3){
+            return -2;
+        }
+        else
+        {
+            break;
+        }
+        resend++;
+    }
 	if(parse_resp_packet(resp_body, resp) < 0) {
 		return -3;
 	}
