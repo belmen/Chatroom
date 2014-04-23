@@ -348,6 +348,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	int nbytes;
 	int seq;
     int resend = 0;
+    int temp_recv = 0;
 
 	sock = make_req_socket();
 	set_recv_timeout(sock, RECV_TIMEOUT);
@@ -367,11 +368,12 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
             return -1;
         }
         // Wait for response or ack
-        if(recv_packet(sock, &r_addr, &resp_body) < 0 && resend < 3) {
+        temp_recv = recv_packet(sock, &r_addr, &resp_body);
+        if( temp_recv < 0 && resend < 3) {
             printf("Timout reached. Resending segment\n");
             //return -2;
         }
-        else if (recv_packet(sock, &r_addr, &resp_body) < 0 && resend >= 3){
+        else if (temp_recv < 0 && resend >= 3){
             return -2;
         }
         else
