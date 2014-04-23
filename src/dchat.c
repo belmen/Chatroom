@@ -10,10 +10,66 @@
 #include <time.h>
 #include "conn-protocol.h"
 
+
+//heartbeat head
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <pthread.h>
+
+#include <signal.h>
+#include <unistd.h>
+#include <time.h>
+#include <errno.h>
+#include "conn-protocol.h"
+//heartbeat head
+
+//heartbeat global
+#define HB_INTERVAL 5   //define time interval of heartbeat signal
+#define HB_ACK_BUF_SIZE 8192
+#define test_addr_str "127.0.0.1"
+#define test_port 21234
+#define MISS_ThreshHold 4
+
+int sock_heartbeat;
+int heart_ACK_len = 0;
+
+char HB_ACK_BUF[HB_ACK_BUF_SIZE];
+
+Request heartBeat_msg;
+struct sockaddr_in *testAddr;
+struct sockaddr_in heartbeat_ACK_Addr;
+socklen_t heartbeat_ACK_Addr_len = sizeof(struct sockaddr_in);
+
+
+char *username_hb;
+struct sockaddr_in *leader_addr_hb;
+
+
+int nonBlocking = 1;
+
+
+int heartbeat_seq = 0;//define heartbeat msg sequence number
+
+int ACK_MISS_CNT = 0;
+int isLeaderCrash = 0;
+//heartbeat global
+
+
+
+
+
+
+
+
+
+
+
 #define CHATTER_LIMIT 500
 #define REQ_JOIN "join"
 #define REQ_MESSAGE "message"
 #define REQ_QUIT "quit"
+#define HEARTBEAT_CtoL "heartbeatCtoL"
 
 typedef struct chatter {
 	char *name;
@@ -47,6 +103,13 @@ void handle_broadcast(const Request, Response *);
 void handle_bc_join(const Request, Response *);
 void handle_bc_message(const Request, Response *);
 void handle_bc_quit(const Request, Response *);
+
+/*********hear beat start*********/
+void alarmHandler(int sig);
+void *HeartBeatProcessor();
+void HeartBeat_Thread_Start(char *username, struct sockaddr_in *leader_addr);
+int send_HeartBeat(const struct sockaddr_in addr, Request *req);
+/*********hear beat end*********/
 
 Chatter chatters[CHATTER_LIMIT]; // Chatters array
 int nchatters = 0;
@@ -444,6 +507,7 @@ void start_client(char *addrport) {
 
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_broadcasts, NULL);
+	HeartBeat_Thread_Start(username, leader_addr);
 
 	start_input();
 }
@@ -595,3 +659,101 @@ void remove_user(const char *name) {
 	}
 	nchatters--;
 }
+
+/***********heartBeat Function start************/
+void alarmHandler(int sig) {
+
+    signal(SIGALRM, SIG_IGN);
+    heart_ACK_len = recvfrom(sock_heartbeat, HB_ACK_BUF, HB_ACK_BUF_SIZE, 0, (struct sockaddr *)&heartbeat_ACK_Addr, &heartbeat_ACK_Addr_len);
+
+    if (heart_ACK_len <= 0){
+        ACK_MISS_CNT++;
+    }
+
+    if(ACK_MISS_CNT >= MISS_ThreshHold)
+        isLeaderCrash = 1;
+
+/*send heartbeat to the leader*/
+
+    send_HeartBeat(*leader_addr_hb, &heartBeat_msg);
+
+    printf("HeartBeat Send Sequence Number: %d\n",heartbeat_seq);
+
+    signal(SIGALRM, alarmHandler);
+    alarm(HB_INTERVAL);
+
+    printf("Miss Count: %d, is leader crash: %d\n", ACK_MISS_CNT, isLeaderCrash);
+
+
+
+}
+
+void *HeartBeatProcessor()
+{
+    sock_heartbeat = make_req_socket();
+    //setting the sockt to nonblocking mode
+    if ( fcntl( sock_heartbeat,
+            F_SETFL,
+            O_NONBLOCK,
+            nonBlocking ) == -1 )
+{
+    printf( "failed to set non-blocking\n" );
+    return;
+}
+
+    //define heartbeat msg to send
+    heartBeat_msg.req = HEARTBEAT_CtoL;
+
+    encap_param(&heartBeat_msg, 1, username_hb);
+
+    //testAddr = make_sock_addr(test_addr_str, test_port);
+
+    signal(SIGALRM, alarmHandler);
+    alarm(HB_INTERVAL);
+}
+
+void HeartBeat_Thread_Start(char *username, struct sockaddr_in *leader_addr)
+{
+    username_hb = username;
+    leader_addr_hb = leader_addr;
+    pthread_t thread_HeartBeat;
+    pthread_create(&thread_HeartBeat, NULL, HeartBeatProcessor, NULL);
+}
+
+int send_HeartBeat(const struct sockaddr_in addr, Request *req) {
+
+	//struct sockaddr_in r_addr;
+	char *msg;
+	int len;
+	int nbytes;
+	int seq;
+
+	seq = heartbeat_seq++;
+	req->seq = seq;
+	len = compose_req_msg(*req, &msg);
+
+
+	printf("Request:\n----\n%s\n----\n", msg);
+	if(len < 0) {
+		perror("compose_req_msg");
+		return -1;
+	}
+	// Send message
+	nbytes = sendto(sock_heartbeat, msg, len, 0, (struct sockaddr *) &addr,
+			(socklen_t) sizeof(struct sockaddr_in));
+	if(nbytes < 0) {
+        printf("send error\n");
+		return -1;
+	}
+
+	//shutdown(sock, 0); // Close socket
+	return 0;
+}
+
+/***********heartBeat Function end************/
+
+
+
+
+
+
