@@ -11,15 +11,24 @@
 #include "conn-protocol.h"
 
 
+<<<<<<< HEAD
+
+/*********hear beat start*********/
+=======
 //heartbeat start
+>>>>>>> 5b4f43abcfda21c8907f39f4e88f48a831f877a3
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
+<<<<<<< HEAD
+
+=======
 //heartbeat end
 
 //heartbeat global start
+>>>>>>> 5b4f43abcfda21c8907f39f4e88f48a831f877a3
 #define HB_INTERVAL 5   //define time interval of heartbeat signal
 #define HB_ACK_BUF_SIZE 8192
 #define test_addr_str "127.0.0.1"
@@ -46,7 +55,12 @@ int heartbeat_seq = 0;//define heartbeat msg sequence number
 
 int ACK_MISS_CNT = 0;
 int isLeaderCrash = 0;
+<<<<<<< HEAD
+pthread_t check_chatter_thread; //for leader, start a thread checking the chatter.
+/*********hear beat end*********/
+=======
 //heartbeat global end
+>>>>>>> 5b4f43abcfda21c8907f39f4e88f48a831f877a3
 
 
 #define CHATTER_LIMIT 500
@@ -95,6 +109,10 @@ void *HeartBeatProcessor();
 int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock);
 
 int handle_beat(const Request req, Response *resp);
+<<<<<<< HEAD
+void *(check_chatters());
+=======
+>>>>>>> 5b4f43abcfda21c8907f39f4e88f48a831f877a3
 /*********hear beat end*********/
 
 Chatter chatters[CHATTER_LIMIT]; // Chatters array
@@ -218,6 +236,7 @@ void start_input() {
 void quit_chatroom() {
 	// Cancel running threads
 	pthread_cancel(listen_thread);
+	pthread_cancel(check_chatter_thread);
 	exit(EXIT_SUCCESS);
 }
 
@@ -258,6 +277,7 @@ void start_leader() {
 	leader.last_hb = 0;
 	chatters[nchatters++] = leader;
 
+
 	printf("%s started a new chat, listening on %s:%d\n",
            username, LOOPBACK_STR, l_port);
 	printf("Succeeded, current users:\n");
@@ -265,7 +285,11 @@ void start_leader() {
 	printf("Waiting for others to join...\n");
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
+<<<<<<< HEAD
+	pthread_create(&check_chatter_thread, NULL, check_chatters, NULL);
+=======
 	//pthread_create(&check_chatter_thread, NULL, check_chatter, NULL);
+>>>>>>> 5b4f43abcfda21c8907f39f4e88f48a831f877a3
 	start_input();
 }
 
@@ -278,6 +302,27 @@ void print_current_chatters() {
 		chatter = chatters[i];
 		printf("%s %s:%d%s\n", chatter.name, chatter.host,
                chatter.port, chatter.leader ? " (Leader)" : "");
+<<<<<<< HEAD
+	}
+}
+
+void *(check_chatters()) {
+	int i;
+	while(1){
+		for(i = 0; i < nchatters; i++) {
+			if (!chatters[i].leader){
+				time_t now = time(0);
+				time_t diff = now - chatters[i].last_hb;
+				if(diff > 10){
+					char *lost_chatter = chatters[i].name;
+					remove_user(lost_chatter);
+					add_broadcast(REQ_QUIT, 3, lost_chatter, "c", "1"); //don't know the parameters!
+					process_broadcast();
+				}
+			}
+		}
+=======
+>>>>>>> 5b4f43abcfda21c8907f39f4e88f48a831f877a3
 	}
 }
 
