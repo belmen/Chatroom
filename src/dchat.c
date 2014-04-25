@@ -140,11 +140,11 @@ int main(int argc, char *argv[]) {
 	// Create listening socket
 	listen_addr = *make_sock_addr(LOOPBACK_STR, l_port);
 	listen_sock = create_socket(listen_addr);
-
+    
 	printf("--- Welcome to Distributed Chatroom! ---\n");
 	printf("Help: Type \":users\" to list current chatters,");
 	printf(" press Ctrl+D to quit.\n\n");
-
+    
 	if(leader) {
 		start_leader();
 	} else {
@@ -163,7 +163,7 @@ void help() {
 void encap_param(Request *req, int argn, ...) {
 	va_list ap;
 	int i;
-
+    
 	if(req == NULL) {
 		return;
 	}
@@ -182,7 +182,7 @@ void start_input() {
 	Request req;
 	Response resp;
 	int len;
-
+    
 	while(1) {
 		if(getline(&input, &size, stdin) < 0) { // EOF
 			break;
@@ -208,10 +208,10 @@ void start_input() {
 			send_request(*leader_addr, &req, &resp);
 		}
 	}
-
+    
 	// Send exit request
 	send_quit();
-
+    
 	quit_chatroom();
 }
 
@@ -227,7 +227,7 @@ void quit_chatroom() {
 void send_quit() {
 	Request req;
 	Response resp;
-
+    
 	/*
 	 * Param1: name
 	 * Param2: leader : "l", client: "c"
@@ -259,8 +259,8 @@ void start_leader() {
 	leader.leader = 1;
 	leader.last_hb = 0;
 	chatters[nchatters++] = leader;
-
-
+    
+    
 	printf("%s started a new chat, listening on %s:%d\n",
            username, LOOPBACK_STR, l_port);
 	printf("Succeeded, current users:\n");
@@ -276,7 +276,7 @@ void start_leader() {
 void print_current_chatters() {
 	int i;
 	Chatter chatter;
-
+    
 	for(i = 0; i < nchatters; i++) {
 		chatter = chatters[i];
 		printf("%s %s:%d%s\n", chatter.name, chatter.host,
@@ -308,7 +308,7 @@ void *(listening_for_requests()) {
 	Request req;
 	Response resp;
 	struct sockaddr_in r_addr;
-
+    
 	resp.status = 0;
 	resp.body = NULL;
 	while(1) {
@@ -346,7 +346,7 @@ void handle_join(const Request req, Response *resp) {
 	time_t t;
 	char *msg;
 	char *name;
-
+    
 	name = req.param[0];
 	if(check_duplicate_name(name)) {
 		if(resp != NULL) {
@@ -355,7 +355,7 @@ void handle_join(const Request req, Response *resp) {
 		}
 		return;
 	}
-
+    
 	new_ctr->name = name;
 	new_ctr->host = req.param[1];
 	if(string_to_int(req.param[2], &new_ctr->port) < 0) {
@@ -369,7 +369,7 @@ void handle_join(const Request req, Response *resp) {
 	if(resp != NULL) {
 		resp->body = msg;
 	}
-
+    
 	add_broadcast(REQ_JOIN, 3, new_ctr->name,
                   new_ctr->host, int_to_string(new_ctr->port));
 }
@@ -382,7 +382,7 @@ void handle_message(const Request req, Response *resp) {
 /* Handle quit request */
 void handle_quit(const Request req, Response *resp) {
 	char *name = req.param[0];
-
+    
 	remove_user(name);
 	add_broadcast(REQ_QUIT, 3, name, "c", "1");
 }
@@ -426,7 +426,7 @@ char check_duplicate_name(const char *name) {
 void add_broadcast(const char *req, const int paramc, ...) {
 	va_list ap;
 	int i;
-
+    
 	va_start(ap, paramc);
 	broadcast_req = (Request *) malloc(sizeof(Request));
 	broadcast_req->req = (char *) malloc(sizeof(char) * (strlen(req) + 1));
@@ -444,11 +444,11 @@ void process_broadcast() {
 	Response resp;
 	Chatter chatter;
 	int i;
-
+    
 	if(broadcast_req == NULL) {
 		return;
 	}
-
+    
 	for(i = 0; i < nchatters; i++) {
 		chatter = chatters[i];
 		if(chatter.leader) { // Print message directly
@@ -468,7 +468,7 @@ int encode_chatters(char **res) {
 	int i;
 	int len = 0;
 	Chatter chatter;
-
+    
 	if(nchatters == 0) {
 		*res = "";
 		return 0;
@@ -501,7 +501,7 @@ void start_client(char *addrport) {
 	int ldr_port;
 	Request req;
 	Response resp;
-
+    
 	if(ldr_port_str == NULL) {
 		ldr_port = 80;
 	} else {
@@ -510,14 +510,14 @@ void start_client(char *addrport) {
 			exit(EXIT_FAILURE);
 		}
 	}
-
+    
 	printf("%s joining a new chat on %s:%d, listening on %s:%d\n",
            username, ldr_addr_str, ldr_port, LOOPBACK_STR, lis_port);
 	// Send join request
 	leader_addr = make_sock_addr(ldr_addr_str, ldr_port);
 	req.req = REQ_JOIN;
 	encap_param(&req, 3, username, LOOPBACK_STR, int_to_string(lis_port));
-
+    
 	if(send_request(*leader_addr, &req, &resp) < 0) {
 		printf("Sorry, no chat is active on %s:%d, try again later.\n",
                ldr_addr_str, ldr_port);
@@ -532,15 +532,15 @@ void start_client(char *addrport) {
 		printf("\n");
 		exit(EXIT_FAILURE);
 	}
-
+    
 	decode_chatters(resp.body);
 	printf("Succeeded, current users:\n");
 	print_current_chatters();
-
+    
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_broadcasts, NULL);
 	HeartBeat_Thread_Start(username, leader_addr);
-
+    
 	start_input();
 }
 
@@ -551,7 +551,7 @@ int decode_chatters(const char *msg) {
 	char *lines[CHATTER_LIMIT];
 	int n, i;
 	int len;
-
+    
 	len = strlen(msg);
 	parse = (char *) malloc(sizeof(char) * (len + 1));
 	strncpy(parse, msg, len);
@@ -561,12 +561,12 @@ int decode_chatters(const char *msg) {
 		lines[n++] = tok;
 		tok = strtok(NULL, LF);
 	}
-
+    
 	nchatters = n;
 	for(i = 0; i < n; i++) {
 		decode_chatter(lines[i], &chatters[i]);
 	}
-
+    
 	free(parse);
 	parse = NULL;
 	return 0;
@@ -577,7 +577,7 @@ void decode_chatter(const char *line, Chatter *p_chatter) {
 	char *parse;
 	char *tok;
 	int len = strlen(line);
-
+    
 	parse = (char *) malloc(sizeof(char) * (len + 1));
 	strncpy(parse, line, len);
 	p_chatter->name = strtok(parse, "\t");
@@ -597,7 +597,7 @@ void *(listening_for_broadcasts()) {
 	Request req;
 	Response resp;
 	struct sockaddr_in r_addr;
-
+    
 	resp.status = 0;
 	resp.body = NULL;
 	while(1) {
@@ -635,7 +635,7 @@ void handle_bc_join(const Request req, Response *resp) {
 	if(string_to_int(req.param[2], &port) < 0) {
 		perror("Invalid port number");
 	}
-
+    
 	if(leader == 0 && strcmp(name, username) != 0) {
 		// Other new chatters
 		new_ctr = &chatters[nchatters++];
@@ -645,7 +645,7 @@ void handle_bc_join(const Request req, Response *resp) {
 		new_ctr->leader = 0;
 		new_ctr->last_hb = 0;
 	}
-
+    
 	printf("NOTICE %s joined on %s:%d\n", name, host, port);
 }
 
@@ -659,19 +659,19 @@ void handle_bc_quit(const Request req, Response *resp) {
 	char *name = req.param[0]; // username
 	int is_leader = strcmp("l", req.param[1]) == 0 ? 1 : 0; // Leader: "l", others: "c"
 	int normal = strcmp("1", req.param[2]) == 0 ? 1 : 0;
-
+    
 	if(leader == 0) {
 		remove_user(name);
 	}
 	printf("NOTICE %s%s left the chat%s\n", name, is_leader ? " (Leader)" : "",
            normal ? "" : " or crashed");
-
+    
 	if(is_leader && leader == 0) {
 		// TODO: Leader election
 		// Now we just quit
 		//quit_chatroom();
 		while(1){
-
+            
 		}
 	}
 }
@@ -710,14 +710,16 @@ void *(HeartBeatProcessor())
         sock_heartbeat = make_req_socket();
         //define heartbeat msg to send
         heartBeat_msg.req = REQ_BEAT;
-
+        
         encap_param(&heartBeat_msg, 1, username_hb);
-
+        
         int continues = 1;
-
+        
         while (continues > 0) {
             continues = send_HeartBeat(*leader_addr_hb, &heartBeat_msg, sock_heartbeat);
-            sleep(5);
+            if (continues > 0){
+                sleep(5);
+            }
         }
         //    send_HeartBeat(*leader_addr_hb, &heartBeat_msg, sock_heartbeat);
         if (continues == -2){
@@ -732,7 +734,7 @@ void *(HeartBeatProcessor())
 }
 
 int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
-
+    
 	//struct sockaddr_in r_addr;
 	char *msg;
 	int len;
@@ -740,23 +742,23 @@ int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
 	int seq;
     int resend = 0;
     int temp_recv;
-
+    
     char* resp_body = NULL;
-
+    
     set_recv_timeout(sock, RECV_TIMEOUT);
-
+    
 	seq = heartbeat_seq++;
 	req->seq = seq;
 	len = compose_req_msg(*req, &msg);
-
-
+    
+    
 	printf("Request:\n----\n%s\n----\n", msg);
 	if(len < 0) {
 		perror("compose_req_msg");
 		return -1;
 	}
-
-
+    
+    
     // Send message
     while (1) {
         nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
@@ -781,7 +783,7 @@ int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
         printf("resend: %d\n", resend);
         resend++;
     }
-
+    
 	//shutdown(sock, 0); // Close socket
     printf("return 1");
 	return 1;
