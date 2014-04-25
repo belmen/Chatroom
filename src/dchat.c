@@ -15,7 +15,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
 #include <signal.h>
 #include <unistd.h>
 //heartbeat end
@@ -41,9 +40,7 @@ socklen_t heartbeat_ACK_Addr_len = sizeof(struct sockaddr_in);
 char *username_hb;
 struct sockaddr_in *leader_addr_hb;
 
-
 int nonBlocking = 1;
-
 
 int heartbeat_seq = 0;//define heartbeat msg sequence number
 
@@ -56,7 +53,7 @@ int isLeaderCrash = 0;
 #define REQ_JOIN "join"
 #define REQ_MESSAGE "message"
 #define REQ_QUIT "quit"
-#define HEARTBEAT_CtoL "heartbeatCtoL"
+#define REQ_BEAT "beat"
 
 typedef struct chatter {
 	char *name;
@@ -92,10 +89,12 @@ void handle_bc_message(const Request, Response *);
 void handle_bc_quit(const Request, Response *);
 
 /*********hear beat start*********/
-void alarmHandler(int sig);
-void *HeartBeatProcessor();
+//void alarmHandler(int sig);
 void HeartBeat_Thread_Start(char *username, struct sockaddr_in *leader_addr);
-int send_HeartBeat(const struct sockaddr_in addr, Request *req);
+void *HeartBeatProcessor();
+int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock);
+
+int handle_beat(const Request req, Response *resp);
 /*********hear beat end*********/
 
 Chatter chatters[CHATTER_LIMIT]; // Chatters array
@@ -106,8 +105,8 @@ Request *broadcast_req; // Broadcast request
 pthread_t listen_thread; // Listening thread
 struct sockaddr_in *leader_addr; // Leader's address
 
-char leader;
-char *username;
+char leader; //to see whether is leader
+char *username;//the name of the user no matter client or leader
 
 int main(int argc, char *argv[]) {
 	char* addrport = NULL;
@@ -260,13 +259,13 @@ void start_leader() {
 	chatters[nchatters++] = leader;
 
 	printf("%s started a new chat, listening on %s:%d\n",
-					username, LOOPBACK_STR, l_port);
+           username, LOOPBACK_STR, l_port);
 	printf("Succeeded, current users:\n");
 	print_current_chatters();
 	printf("Waiting for others to join...\n");
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
-
+	//pthread_create(&check_chatter_thread, NULL, check_chatter, NULL);
 	start_input();
 }
 
@@ -278,7 +277,7 @@ void print_current_chatters() {
 	for(i = 0; i < nchatters; i++) {
 		chatter = chatters[i];
 		printf("%s %s:%d%s\n", chatter.name, chatter.host,
-				chatter.port, chatter.leader ? " (Leader)" : "");
+               chatter.port, chatter.leader ? " (Leader)" : "");
 	}
 }
 
@@ -315,6 +314,8 @@ void handle_request(const Request req, Response *resp) {
 		handle_message(req, resp);
 	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Quit
 		handle_quit(req, resp);
+	} else if(strcmp(req.req, REQ_BEAT) == 0) { //chatter send beet signal
+		handle_beat(req, resp);
 	}
 }
 
@@ -349,7 +350,7 @@ void handle_join(const Request req, Response *resp) {
 	}
 
 	add_broadcast(REQ_JOIN, 3, new_ctr->name,
-			new_ctr->host, int_to_string(new_ctr->port));
+                  new_ctr->host, int_to_string(new_ctr->port));
 }
 
 /* Handle message request */
@@ -363,6 +364,30 @@ void handle_quit(const Request req, Response *resp) {
 
 	remove_user(name);
 	add_broadcast(REQ_QUIT, 3, name, "c", "1");
+}
+
+
+
+int handle_beat(const Request req, Response *resp){
+	char *name = req.param[0];
+	int i;
+	for(i = 0; i < nchatters; i++) {
+		if(strcmp(name, chatters[i].name) == 0) {
+			time_t now = time(0);
+			time_t diff = now - chatters[i].last_hb;
+			if (diff > 10){
+				remove(chatters[i].name);
+				add_broadcast(REQ_QUIT, 3, name, "c", "1"); //I don't know the parameters!!
+				return 0;
+			}
+			else{
+				chatters[i].last_hb = now;
+				printf("last heartbeat for %s : %ld\n", chatters[i].name, chatters[i].last_hb);
+				return 1;
+			}
+		}
+	}
+	return -1;
 }
 
 /* Check if a name already exists in chatroom */
@@ -412,7 +437,6 @@ void process_broadcast() {
 			send_request(addr, broadcast_req, &resp);
 		}
 	}
-
 	broadcast_req = NULL;
 }
 
@@ -467,7 +491,7 @@ void start_client(char *addrport) {
 	}
 
 	printf("%s joining a new chat on %s:%d, listening on %s:%d\n",
-			username, ldr_addr_str, ldr_port, LOOPBACK_STR, lis_port);
+           username, ldr_addr_str, ldr_port, LOOPBACK_STR, lis_port);
 	// Send join request
 	leader_addr = make_sock_addr(ldr_addr_str, ldr_port);
 	req.req = REQ_JOIN;
@@ -475,7 +499,7 @@ void start_client(char *addrport) {
 
 	if(send_request(*leader_addr, &req, &resp) < 0) {
 		printf("Sorry, no chat is active on %s:%d, try again later.\n",
-				ldr_addr_str, ldr_port);
+               ldr_addr_str, ldr_port);
 		printf("Bye.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -619,12 +643,15 @@ void handle_bc_quit(const Request req, Response *resp) {
 		remove_user(name);
 	}
 	printf("NOTICE %s%s left the chat%s\n", name, is_leader ? " (Leader)" : "",
-			normal ? "" : " or crashed");
+           normal ? "" : " or crashed");
 
 	if(is_leader && leader == 0) {
 		// TODO: Leader election
 		// Now we just quit
-		quit_chatroom();
+		//quit_chatroom();
+		while(1){
+
+		}
 	}
 }
 
@@ -648,57 +675,6 @@ void remove_user(const char *name) {
 }
 
 /***********heartBeat Function start************/
-void alarmHandler(int sig) {
-
-    signal(SIGALRM, SIG_IGN);
-    heart_ACK_len = recvfrom(sock_heartbeat, HB_ACK_BUF, HB_ACK_BUF_SIZE, 0, (struct sockaddr *)&heartbeat_ACK_Addr, &heartbeat_ACK_Addr_len);
-
-    if (heart_ACK_len <= 0){
-        ACK_MISS_CNT++;
-    }
-
-    if(ACK_MISS_CNT >= MISS_ThreshHold)
-        isLeaderCrash = 1;
-
-/*send heartbeat to the leader*/
-
-    send_HeartBeat(*leader_addr_hb, &heartBeat_msg);
-
-    printf("HeartBeat Send Sequence Number: %d\n",heartbeat_seq);
-
-    signal(SIGALRM, alarmHandler);
-    alarm(HB_INTERVAL);
-
-    printf("Miss Count: %d, is leader crash: %d\n", ACK_MISS_CNT, isLeaderCrash);
-
-
-
-}
-
-void *HeartBeatProcessor()
-{
-    sock_heartbeat = make_req_socket();
-    //setting the sockt to nonblocking mode
-    if ( fcntl( sock_heartbeat,
-            F_SETFL,
-            O_NONBLOCK,
-            nonBlocking ) == -1 )
-{
-    printf( "failed to set non-blocking\n" );
-    return;
-}
-
-    //define heartbeat msg to send
-    heartBeat_msg.req = HEARTBEAT_CtoL;
-
-    encap_param(&heartBeat_msg, 1, username_hb);
-
-    //testAddr = make_sock_addr(test_addr_str, test_port);
-
-    signal(SIGALRM, alarmHandler);
-    alarm(HB_INTERVAL);
-}
-
 void HeartBeat_Thread_Start(char *username, struct sockaddr_in *leader_addr)
 {
     username_hb = username;
@@ -707,13 +683,46 @@ void HeartBeat_Thread_Start(char *username, struct sockaddr_in *leader_addr)
     pthread_create(&thread_HeartBeat, NULL, HeartBeatProcessor, NULL);
 }
 
-int send_HeartBeat(const struct sockaddr_in addr, Request *req) {
+void *(HeartBeatProcessor())
+{
+    while(1){
+        sock_heartbeat = make_req_socket();
+        //define heartbeat msg to send
+        heartBeat_msg.req = REQ_BEAT;
+
+        encap_param(&heartBeat_msg, 1, username_hb);
+
+        int continues = 1;
+
+        while (continues > 0) {
+            continues = send_HeartBeat(*leader_addr_hb, &heartBeat_msg, sock_heartbeat);
+            sleep(5);
+        }
+        //    send_HeartBeat(*leader_addr_hb, &heartBeat_msg, sock_heartbeat);
+        if (continues == -2){
+            printf("leader is down\n");
+        }
+        while(1){
+            if(continues == 3){   //haven't set break condition yet;
+                break;
+            }
+        }
+    }
+}
+
+int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
 
 	//struct sockaddr_in r_addr;
 	char *msg;
 	int len;
 	int nbytes;
 	int seq;
+    int resend = 0;
+    int temp_recv;
+
+    char* resp_body = NULL;
+
+    set_recv_timeout(sock, RECV_TIMEOUT);
 
 	seq = heartbeat_seq++;
 	req->seq = seq;
@@ -725,22 +734,36 @@ int send_HeartBeat(const struct sockaddr_in addr, Request *req) {
 		perror("compose_req_msg");
 		return -1;
 	}
-	// Send message
-	nbytes = sendto(sock_heartbeat, msg, len, 0, (struct sockaddr *) &addr,
-			(socklen_t) sizeof(struct sockaddr_in));
-	if(nbytes < 0) {
-        printf("send error\n");
-		return -1;
-	}
+
+
+    // Send message
+    while (1) {
+        nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
+                        (socklen_t) sizeof(struct sockaddr_in));
+        if(nbytes < 0) {
+            return -1;
+        }
+        // Wait for response or ack
+        temp_recv = recv_packet(sock, &addr, &resp_body);
+        if( temp_recv < 0 && resend < 3) {
+            printf("Timout reached. Resending beat\n");
+        }
+        else if (temp_recv < 0 && resend >= 3){
+            printf("return -2\n");
+            return -2;
+        }
+        else
+        {
+            printf("break\n");
+            break;
+        }
+        printf("resend: %d\n", resend);
+        resend++;
+    }
 
 	//shutdown(sock, 0); // Close socket
-	return 0;
+    printf("return 1");
+	return 1;
 }
 
 /***********heartBeat Function end************/
-
-
-
-
-
-
