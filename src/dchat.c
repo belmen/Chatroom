@@ -23,6 +23,7 @@
 /*********hear beat start*********/
 #define REQ_BEAT "beat"
 #define REQ_ELECTION "elect"
+#define ANNOUNCE "newleader"
 /*********hear beat start*********/
 
 typedef struct chatter {
@@ -82,7 +83,15 @@ int sock_heartbeat;
 Request heartBeat_msg;
 int heartbeat_seq = 0;//define heartbeat msg sequence number
 pthread_t check_chatter_thread; //for leader, start a thread checking the chatter.
+pthread_t thread_HeartBeat;
 /*********hear beat end***********/
+/*********leader election*********/
+int leader_down = 0;
+int isnewleader = 0;
+void handle_bc_election(const Request req, Response *resp);
+void handle_bc_announce(const Request req, Response *resp);
+int send_election(const int sock, const struct sockaddr_in addr, Request *req, Response *resp);
+/*********leader election*********/
 
 
 int main(int argc, char *argv[]) {
@@ -195,7 +204,12 @@ void start_input() {
 void quit_chatroom() {
 	// Cancel running threads
 	pthread_cancel(listen_thread);
-	pthread_cancel(check_chatter_thread);
+    if (leader) {
+        pthread_cancel(check_chatter_thread);
+    }
+    else{
+        pthread_cancel(thread_HeartBeat);
+    }
 	exit(EXIT_SUCCESS);
 }
 
@@ -270,7 +284,7 @@ void *(check_chatters()) {
 				if(diff > 10){
 					char *lost_chatter = chatters[i].name;
 					remove_user(lost_chatter);
-					add_broadcast(REQ_QUIT, 3, lost_chatter, "c", "1"); //don't know the parameters!
+					add_broadcast(REQ_QUIT, 3, lost_chatter, "c", "0");
 					process_broadcast();
 				}
 			}
@@ -371,17 +385,9 @@ int handle_beat(const Request req, Response *resp){
 	for(i = 0; i < nchatters; i++) {
 		if(strcmp(name, chatters[i].name) == 0) {
 			time_t now = time(0);
-			time_t diff = now - chatters[i].last_hb;
-			if (diff > 10){
-				remove(chatters[i].name);
-				add_broadcast(REQ_QUIT, 3, name, "c", "1"); //I don't know the parameters!!
-				return 0;
-			}
-			else{
-				chatters[i].last_hb = now;
-				//printf("last heartbeat for %s : %ld\n", chatters[i].name, chatters[i].last_hb);
-				return 1;
-			}
+            chatters[i].last_hb = now;
+			//printf("last heartbeat for %s : %ld\n", chatters[i].name, chatters[i].last_hb);
+			return 1;
 		}
 	}
 	return -1;
@@ -515,9 +521,8 @@ void start_client(char *addrport) {
     
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_broadcasts, NULL);
-	pthread_t thread_HeartBeat;
 	pthread_create(&thread_HeartBeat, NULL, HeartBeatProcessor, NULL);
-
+    
     
 	start_input();
 }
@@ -601,7 +606,11 @@ void handle_broadcast(const Request req, Response *resp) {
 		handle_bc_message(req, resp);
 	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Someone quit
 		handle_bc_quit(req, resp);
-	}
+	} else if(strcmp(req.req, REQ_ELECTION) == 0){
+        handle_bc_election(req, resp);
+    } else if(strcmp(req.req, ANNOUNCE) == 0){
+        handle_bc_announce(req, resp);
+    }
 }
 
 /* Handle other chatter's joining event */
@@ -648,10 +657,22 @@ void handle_bc_quit(const Request req, Response *resp) {
 		// TODO: Leader election
 		// Now we just quit
 		//quit_chatroom();
-		while(1){
-            
-		}
+        //		while(1){
+        //
+        //		}
 	}
+}
+
+void handle_bc_election(const Request req, Response *resp){
+    printf("I got election message from %s\n", req.param[0]);
+}
+
+void handle_bc_announce(const Request req, Response *resp){
+    //flag to close heartbeat thread and start check chatter thread
+    int newleader_port;
+    string_to_int(req.param[2], &newleader_port);
+    leader_addr = make_sock_addr(req.param[1], newleader_port);//set the leader_addr to newleader's address
+    leader_down = 0;
 }
 
 /* Remove a chatter from chatter list */
@@ -676,32 +697,179 @@ void remove_user(const char *name) {
 /***********heartBeat Function start************/
 void *(HeartBeatProcessor())
 {
+    int hasBiggerRsp = 0;
+    int myport = 0; // client's port number
     while(1){
         sock_heartbeat = make_req_socket();
         //define heartbeat msg to send
         heartBeat_msg.req = REQ_BEAT;
-        
         encap_param(&heartBeat_msg, 1, username);
-        
         int continues = 1;
-        
         while (continues > 0) {
             continues = send_HeartBeat(*leader_addr, &heartBeat_msg, sock_heartbeat);
             if (continues > 0){
                 sleep(1);
             }
         }
-        //    send_HeartBeat(*leader_addr_hb, &heartBeat_msg, sock_heartbeat);
         if (continues == -2){
             printf("leader is down\n");
-
+            leader_down = 1;
+            int i;
+            for(i = 0; i < nchatters; i++) {
+                if(chatters[i].leader) {
+                    //add_broadcast(REQ_QUIT, 3, chatters[i].name, "l", "0"); //for now, the message cannot be broadcast.
+                    remove_user(chatters[i].name);
+                    //process_broadcast();
+                }
+            }
         }
+        //        /*
+        //         * Shut down and close heartbeat socket completely.
+        //         */
+        //        int retval = shutdown(sock_heartbeat,2);
+        //        if (retval == -1)
+        //            perror ("shutdown");
+        //        retval = close (sock_heartbeat);
+        //        if (retval)
+        //            perror ("close");
+        /**************updated sorting**************/
+        int sorted_portNumber[nchatters];
+        
+        int temp_selectionSort;
+        for (int i = 0; i < nchatters; i++ ){
+            sorted_portNumber[i] = chatters[i].port;
+            if (strcmp(username, chatters[i].name) == 0){
+                myport = chatters[i].port;
+            }
+        }
+        for(int i = 0; i < (nchatters - 1); i++) {
+            int maxIndx = i;
+            for(int j = i + 1; j < nchatters; j++){
+                if(sorted_portNumber[maxIndx] < sorted_portNumber[j]) {
+                    maxIndx = j;
+                }
+            }
+            temp_selectionSort = sorted_portNumber[i];
+            sorted_portNumber[i] = sorted_portNumber[maxIndx];
+            sorted_portNumber[maxIndx] = temp_selectionSort;
+        }
+        for(int c = 0; c < nchatters; c++){
+            printf("Port number: %d\n",sorted_portNumber[c]);
+        }
+        printf("My port number: %d\n", myport);
+        /**************updated sorting**************/
         while(1){
-            if(continues == 3){   //haven't set break condition yet;
+            if(!leader_down){ //break too slow!
                 break;
+            }
+            for (int num = 0; num < nchatters; num++){
+                if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
+                    sleep(5);
+                    hasBiggerRsp = 0;
+                }
+                else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
+                    Request elect_req;
+                    Response elect_rsp;
+                    int election_sock = sock_heartbeat;
+                    int bigger = sorted_portNumber[num];
+                    struct sockaddr_in *elect_addr;
+                    elect_addr = make_sock_addr("localhost", bigger);
+                    elect_req.req = REQ_ELECTION;
+                    encap_param(&elect_req, 1, username);
+                    int result = send_election(election_sock, *elect_addr, &elect_req, &elect_rsp);//send election message here.
+                    if(result > 0){
+                        //printf("got the message response\n");
+                        hasBiggerRsp = 1;
+                    }
+                    sleep(60); //for it to stay, haven't implement leader elected.
+                }
+                /*************I have the highest port number and ready to announce myself as leader******************/
+                else{
+                    sleep(3);
+                    add_broadcast(ANNOUNCE, 3, username, LOOPBACK_STR, myport);
+                    /* Send broadcast message to all clients */
+                    struct sockaddr_in addr;
+                    Response resp;
+                    Chatter chatter;
+                    int i;
+                    for(i = 0; i < nchatters; i++) {
+                        chatter = chatters[i];
+                        //not send announce msg to myself
+                        if(chatter.port != myport) {
+                            addr = *make_sock_addr(chatter.host, chatter.port);
+                            send_request(addr, broadcast_req, &resp);
+                        }
+                        else {
+                            chatters[i].leader = 1;
+                            chatters[i].last_hb = 0;
+                        }
+                    }
+                    broadcast_req = NULL;
+                    
+                    isnewleader = 1;//set the isnewleader flag = 1;begin close and open threads in start_input()
+                    //announce_leader();
+                    /*************I have the highest port number and ready to announce myself as leader******************/
+                }
             }
         }
     }
+}
+
+//void announce_leader(){ //undeclared
+//
+//}
+
+int send_election(const int sock, const struct sockaddr_in addr, Request *req, Response *resp){
+    //struct sockaddr_in r_addr;
+	char *msg;
+	int len;
+	int nbytes;
+	int seq = 0;
+    int resend = 0;
+    int temp_recv;
+    
+    char* resp_body = NULL;
+    
+    set_recv_timeout(sock, RECV_TIMEOUT);
+    
+	//seq ++;
+	req->seq = seq;
+	len = compose_req_msg(*req, &msg);
+    
+    
+	//printf("Request:\n----\n%s\n----\n", msg);
+	if(len < 0) {
+		perror("compose_req_msg");
+		return -1;
+	}
+    
+    
+    // Send message
+    while (1) {
+        nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
+                        (socklen_t) sizeof(struct sockaddr_in));
+        if(nbytes < 0) {
+            return -1;
+        }
+        // Wait for response or ack
+        temp_recv = recv_packet(sock, &addr, &resp_body);
+        if( temp_recv < 0 && resend < 3) {
+            printf("Timout reached. Resending beat\n");
+        }
+        else if (temp_recv < 0 && resend >= 3){
+            //printf("return -2\n");
+            return -2;
+        }
+        else
+        {
+            //printf("break\n");
+            break;
+        }
+        //printf("resend: %d\n", resend);
+        resend++;
+    }
+    //printf("return 1");
+	return 1;
 }
 
 int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
