@@ -24,6 +24,7 @@
 #define REQ_BEAT "beat"
 #define REQ_ELECTION "elect"
 #define ANNOUNCE "newleader"
+#define REQ_UPDATE "update"
 /*********hear beat start*********/
 
 typedef struct chatter {
@@ -86,13 +87,16 @@ pthread_t check_chatter_thread; //for leader, start a thread checking the chatte
 pthread_t thread_HeartBeat;
 pthread_t read_input;
 /*********hear beat end***********/
+
 /*********leader election*********/
 int leader_down = 0;
 int isnewleader = 0;
 void handle_bc_election(const Request req, Response *resp);
 void handle_bc_announce(const Request req, Response *resp);
+void handle_bc_update(const Request req, Response *resp);
 void *start_read_input();
 int send_election(const int sock, const struct sockaddr_in addr, Request *req, Response *resp);
+
 /*********leader election*********/
 
 
@@ -171,8 +175,6 @@ void start_input() {
 	int len;
     
 	while(1) {
-        
-        
         
 		if(getline(&input, &size, stdin) < 0) { // EOF
 			break;
@@ -390,8 +392,17 @@ void handle_join(const Request req, Response *resp) {
 		if(resp != NULL) {
 			resp->status = -2;
 			resp->body = NULL;
+            
+			//join debug output
+			//printf("%s is already in the list\n", name);
+			//print_current_chatters();
 		}
 		return;
+	}
+	else
+	{
+		resp->status = 0;
+		//printf("set status to 0\n");
 	}
     
 	new_ctr->name = name;
@@ -554,6 +565,8 @@ void start_client(char *addrport) {
 		printf("Bye.\n");
 		exit(EXIT_FAILURE);
 	}
+	//join debug output
+	//printf("%d\n", resp.status);
 	if(resp.status < 0) {
 		printf("Failed to join chat on %s:%d.", ldr_addr_str, ldr_port);
 		if(resp.status == -2) {
@@ -588,7 +601,6 @@ void start_client(char *addrport) {
 		present = time(0);
 		chatters[iterater].last_hb = present;
 	}
-    
     
     
 	//start leader related thread
@@ -697,11 +709,18 @@ void handle_broadcast(const Request req, Response *resp) {
         handle_bc_election(req, resp);
     } else if(strcmp(req.req, ANNOUNCE) == 0){
         handle_bc_announce(req, resp);
+    } else if(strcmp(req.req, REQ_UPDATE) == 0){
+    	handle_bc_update(req, resp);
     }
 }
 
 /* Handle other chatter's joining event */
 void handle_bc_join(const Request req, Response *resp) {
+    
+    
+	//char *new_join_name;
+	//new_join_name = req.param[0];
+    
 	Chatter *new_ctr;
 	char *name = req.param[0];
 	char *host = req.param[1];
@@ -773,6 +792,12 @@ void handle_bc_announce(const Request req, Response *resp){
     
 }
 
+
+void handle_bc_update(const Request req, Response *resp){
+    
+    
+}
+
 /* Remove a chatter from chatter list */
 void remove_user(const char *name) {
 	int i;
@@ -821,15 +846,7 @@ void *(HeartBeatProcessor())
                 }
             }
         }
-        //        /*
-        //         * Shut down and close heartbeat socket completely.
-        //         */
-        //        int retval = shutdown(sock_heartbeat,2);
-        //        if (retval == -1)
-        //            perror ("shutdown");
-        //        retval = close (sock_heartbeat);
-        //        if (retval)
-        //            perror ("close");
+        
         /**************updated sorting**************/
         int sorted_portNumber[nchatters];
         int i_sort;
@@ -885,6 +902,7 @@ void *(HeartBeatProcessor())
                             printf("got the message response\n");
                             hasBiggerRsp = 1;
                         }
+                        //if current chatter with highest port number does not exist, then remove it from the list , resort, and break
                         //how to break this loop??
                         //sleep(60); //for it to stay, haven't implement leader elected.
                     }
@@ -923,25 +941,7 @@ void *(HeartBeatProcessor())
 						chatters[iter].last_hb = 0;
 					}
 				}
-                //                /* Send broadcast message to all clients */
-                //                struct sockaddr_in addr;
-                //                Response resp;
-                //                Chatter chatter;
-                //                int i;
-                //                for(i = 0; i < nchatters; i++) {
-                //                    chatter = chatters[i];
-                //                    //not send announce msg to myself
-                //                    if(chatter.port != myport) {
-                //                        addr = *make_sock_addr(chatter.host, chatter.port);
-                //                        send_request(addr, broadcast_req, &resp);
-                //                        printf("leader announce sent\n");
-                //                    }
-                //                    else {
-                //                        chatters[i].leader = 1;
-                //                        chatters[i].last_hb = 0;
-                //                    }
-                //                }
-                //                broadcast_req = NULL;
+                
                 
                 isnewleader = 1;//set the isnewleader flag = 1;begin close and open threads in start_input()
                 leader = 1;//set the leader flag
