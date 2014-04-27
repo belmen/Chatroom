@@ -877,40 +877,77 @@ void *(HeartBeatProcessor())
         }
         printf("My port number: %d\n", myport);
         /**************updated sorting**************/
+        
         while(leader_down){
-            if(myport < sorted_portNumber[0]){
-            	int num;
-                for (num = 0; num < nchatters; num++){
-                    if(!leader_down){
-                        break;
-                    }
-                    if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
-                        sleep(5);
-                        hasBiggerRsp = 0;
-                    }
-                    else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
-                        Request elect_req;
-                        Response elect_rsp;
-                        int election_sock = sock_heartbeat;
-                        int bigger = sorted_portNumber[num];
-                        struct sockaddr_in *elect_addr;
-                        elect_addr = make_sock_addr("localhost", bigger);
-                        elect_req.req = REQ_ELECTION;
-                        encap_param(&elect_req, 1, username);
-                        int result = send_election(election_sock, *elect_addr, &elect_req, &elect_rsp);//send election message here.
-                        if(result > 0){
-                            printf("got the message response\n");
-                            hasBiggerRsp = 1;
-                        }
-                        //if current chatter with highest port number does not exist, then remove it from the list , resort, and break
-                        //how to break this loop??
-                        //sleep(60); //for it to stay, haven't implement leader elected.
-                    }
-                }
+        	if(myport < sorted_portNumber[0]){
+				int num = 0;
+				while(num < nchatters) {
+					if(!leader_down){
+						break;
+					}
+					if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
+						sleep(3);
+						hasBiggerRsp = 0;
+					}
+					else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
+						Request elect_req;
+						Response elect_rsp;
+						int election_sock = sock_heartbeat;
+						int bigger = sorted_portNumber[num];
+						struct sockaddr_in *elect_addr;
+						elect_addr = make_sock_addr("localhost", bigger);
+						elect_req.req = REQ_ELECTION;
+						encap_param(&elect_req, 1, username);
+						int result = send_election(election_sock, *elect_addr, &elect_req, &elect_rsp);//send election message here.
+						if(result > 0){
+							printf("got the message response\n");
+							hasBiggerRsp = 1;
+						}
+						else{
+							//delete the unresponsed pre-leader;
+							for (i_sort = 0; i_sort < nchatters; i_sort++ ){
+								if(chatters[i_sort].port == bigger){
+									remove_user(chatters[i_sort].name);
+								}
+							}
+							print_current_chatters();
+							//get the new sorted port number list
+							for (i_sort = 0; i_sort < nchatters; i_sort++ ){
+								sorted_portNumber[i_sort] = chatters[i_sort].port;
+								if (strcmp(username, chatters[i_sort].name) == 0){
+									myport = chatters[i_sort].port;
+								}
+							}
+                            
+							for(i_sort = 0; i_sort < (nchatters - 1); i_sort++) {
+								int maxIndx = i_sort;
+								int j;
+								for(j = i_sort + 1; j < nchatters; j++){
+									if(sorted_portNumber[maxIndx] < sorted_portNumber[j]) {
+										maxIndx = j;
+									}
+								}
+								temp_selectionSort = sorted_portNumber[i_sort];
+								sorted_portNumber[i_sort] = sorted_portNumber[maxIndx];
+								sorted_portNumber[maxIndx] = temp_selectionSort;
+							}
+							break;
+						}
+                        //                        num ++;
+						//how to break this loop??
+						//sleep(60); //for it to stay, haven't implement leader elected.
+					}
+					else{
+						//the higher pre-leader responsed but didn't announce.
+						//delete the unannounced pre-leader.
+					}
+				}
             }
+            
+            
             /*************I have the highest port number and ready to announce myself as leader******************/
             else {
-                sleep(3);
+                sleep(1);
                 //add_broadcast(ANNOUNCE, 3, username, LOOPBACK_STR, myport);
                 Request anounce_req;
 				Response anounce_rsp;
@@ -950,7 +987,7 @@ void *(HeartBeatProcessor())
                 pthread_exit(&x_return);
                 /*************I have the highest port number and ready to announce myself as leader******************/
             }
-        }
+        }//end of while (leader down)
     }
 }
 
@@ -992,10 +1029,10 @@ int send_election(const int sock, const struct sockaddr_in addr, Request *req, R
         }
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
-        if( temp_recv < 0 && resend < 3) {
+        if( temp_recv < 0 && resend < 2) {
             printf("Timout reached. Send election\n");
         }
-        else if (temp_recv < 0 && resend >= 3){
+        else if (temp_recv < 0 && resend >= 2){
             //printf("return -2\n");
             return -2;
         }
@@ -1047,10 +1084,10 @@ int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
         }
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
-        if( temp_recv < 0 && resend < 3) {
+        if( temp_recv < 0 && resend < 2) {
             printf("Timout reached. Resending beat\n");
         }
-        else if (temp_recv < 0 && resend >= 3){
+        else if (temp_recv < 0 && resend >= 2){
             //printf("return -2\n");
             return -2;
         }
