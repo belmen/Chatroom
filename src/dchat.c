@@ -169,6 +169,31 @@ void start_input() {
 	int len;
     
 	while(1) {
+        /******become new leader**********/
+		if (isnewleader){
+			//clear client related thread
+			pthread_cancel(listen_thread);
+			pthread_cancel(thread_HeartBeat);
+			//start leader related thread
+			pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
+			pthread_create(&check_chatter_thread, NULL, check_chatters, NULL);
+            
+			//broadcast current chatter List to all clients
+            
+            
+            
+            
+			//output new user info
+			int newleader_port = get_port_number(listen_sock);
+			printf("%s elected as new leader, listening on %s:%d\n",
+		           username, LOOPBACK_STR, newleader_port);
+			printf("Current users:\n");
+			print_current_chatters();
+            
+			//reset the flag
+			isnewleader = 0;
+		}
+        /******become new leader**********/
 		if(getline(&input, &size, stdin) < 0) { // EOF
 			break;
 		}
@@ -656,7 +681,7 @@ void handle_bc_quit(const Request req, Response *resp) {
 	if(is_leader && leader == 0) {
 		// TODO: Leader election
 		// Now we just quit
-		quit_chatroom();
+		//quit_chatroom();
         //		while(1){
         //
         //		}
@@ -669,10 +694,19 @@ void handle_bc_election(const Request req, Response *resp){
 
 void handle_bc_announce(const Request req, Response *resp){
     //flag to close heartbeat thread and start check chatter thread
+	printf("received new leader announce\n");
     int newleader_port;
     string_to_int(req.param[2], &newleader_port);
+    int i_iter;
+    
+    for(i_iter = 0; i_iter < nchatters; i_iter++)
+    	if(strcmp(chatters[i_iter].name, req.param[0]) == 0)
+    		chatters[i_iter].leader = 1;
+    
     leader_addr = make_sock_addr(req.param[1], newleader_port);//set the leader_addr to newleader's address
     leader_down = 0;
+    
+    
 }
 
 /* Remove a chatter from chatter list */
@@ -734,26 +768,30 @@ void *(HeartBeatProcessor())
         //            perror ("close");
         /**************updated sorting**************/
         int sorted_portNumber[nchatters];
+        int i_sort;
         
         int temp_selectionSort;
-        for (int i = 0; i < nchatters; i++ ){
-            sorted_portNumber[i] = chatters[i].port;
-            if (strcmp(username, chatters[i].name) == 0){
-                myport = chatters[i].port;
+        for (i_sort = 0; i_sort < nchatters; i_sort++ ){
+            sorted_portNumber[i_sort] = chatters[i_sort].port;
+            if (strcmp(username, chatters[i_sort].name) == 0){
+                myport = chatters[i_sort].port;
             }
         }
-        for(int i = 0; i < (nchatters - 1); i++) {
-            int maxIndx = i;
-            for(int j = i + 1; j < nchatters; j++){
+        
+        for(i_sort = 0; i_sort < (nchatters - 1); i_sort++) {
+            int maxIndx = i_sort;
+            int j;
+            for(j = i_sort + 1; j < nchatters; j++){
                 if(sorted_portNumber[maxIndx] < sorted_portNumber[j]) {
                     maxIndx = j;
                 }
             }
-            temp_selectionSort = sorted_portNumber[i];
-            sorted_portNumber[i] = sorted_portNumber[maxIndx];
+            temp_selectionSort = sorted_portNumber[i_sort];
+            sorted_portNumber[i_sort] = sorted_portNumber[maxIndx];
             sorted_portNumber[maxIndx] = temp_selectionSort;
         }
-        for(int c = 0; c < nchatters; c++){
+        int c;
+        for(c = 0; c < nchatters; c++){
             printf("Port number: %d\n",sorted_portNumber[c]);
         }
         printf("My port number: %d\n", myport);
@@ -818,6 +856,10 @@ void *(HeartBeatProcessor())
     }
 }
 
+//void announce_leader(){ //undeclared
+//
+//}
+
 int send_election(const int sock, const struct sockaddr_in addr, Request *req, Response *resp){
     //struct sockaddr_in r_addr;
 	char *msg;
@@ -853,7 +895,7 @@ int send_election(const int sock, const struct sockaddr_in addr, Request *req, R
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
         if( temp_recv < 0 && resend < 3) {
-            printf("Timout reached. Resending election\n");
+            printf("Timout reached. Resending beat\n");
         }
         else if (temp_recv < 0 && resend >= 3){
             //printf("return -2\n");
