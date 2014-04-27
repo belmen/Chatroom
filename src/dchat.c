@@ -581,6 +581,16 @@ void start_client(char *addrport) {
 	pthread_cancel(listen_thread);
 	//pthread_cancel(thread_HeartBeat);
     
+	//set the timestamp in Chatter List for the leader
+	time_t present;
+	int iterater;
+	for (iterater = 0; iterater < nchatters; iterater++){
+		present = time(0);
+		chatters[iterater].last_hb = present;
+	}
+    
+    
+    
 	//start leader related thread
 	pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
 	pthread_create(&check_chatter_thread, NULL, check_chatters, NULL);
@@ -934,6 +944,7 @@ void *(HeartBeatProcessor())
                 //                broadcast_req = NULL;
                 
                 isnewleader = 1;//set the isnewleader flag = 1;begin close and open threads in start_input()
+                leader = 1;//set the leader flag
                 //sleep(10);
                 int x_return = 1;
                 pthread_exit(&x_return);
@@ -1037,7 +1048,7 @@ int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
         if( temp_recv < 0 && resend < 3) {
-            //printf("Timout reached. Resending beat\n");
+            printf("Timout reached. Resending beat\n");
         }
         else if (temp_recv < 0 && resend >= 3){
             //printf("return -2\n");
