@@ -557,7 +557,7 @@ void start_client(char *addrport) {
 	// Send join request
 	leader_addr = make_sock_addr(ldr_addr_str, ldr_port);
 	req.req = REQ_JOIN;
-	encap_param(&req, 3, username, LOOPBACK_STR, int_to_string(lis_port));
+	encap_param(&req, 4, username, LOOPBACK_STR, int_to_string(lis_port), "ok");
     
 	if(send_request(*leader_addr, &req, &resp) < 0) {
 		printf("Sorry, no chat is active on %s:%d, try again later.\n",
@@ -574,6 +574,15 @@ void start_client(char *addrport) {
 		}
 		printf("\n");
 		exit(EXIT_FAILURE);
+	}
+	else if(resp.status == 5){
+		string_to_int(resp.body, &ldr_port);
+		leader_addr = make_sock_addr(ldr_addr_str, ldr_port);
+		if(send_request(*leader_addr, &req, &resp) < 0) {
+            printf("connect real leader %s:%d failed.\n", ldr_addr_str, ldr_port);
+            printf("Bye.\n");
+            exit(EXIT_FAILURE);
+		}
 	}
     
 	decode_chatters(resp.body);
@@ -720,26 +729,61 @@ void handle_bc_join(const Request req, Response *resp) {
     
 	//char *new_join_name;
 	//new_join_name = req.param[0];
-    
-	Chatter *new_ctr;
-	char *name = req.param[0];
-	char *host = req.param[1];
-	int port;
-	if(string_to_int(req.param[2], &port) < 0) {
-		perror("Invalid port number");
+	if (req.paramc == 3){
+		Chatter *new_ctr;
+		char *name = req.param[0];
+		char *host = req.param[1];
+		int port;
+		if(string_to_int(req.param[2], &port) < 0) {
+			perror("Invalid port number");
+		}
+        
+		if(leader == 0 && strcmp(name, username) != 0) {
+			// Other new chatters
+			new_ctr = &chatters[nchatters++];
+			new_ctr->name = name;
+			new_ctr->host = host;
+			new_ctr->port = port;
+			new_ctr->leader = 0;
+			new_ctr->last_hb = 0;
+		}
+		//printf("%d\n", req.paramc);
+        
+		printf("NOTICE %s joined on %s:%d\n", name, host, port);
+	}
+	else if (req.paramc == 4)
+	{
+		printf("enter paramc ==0\n");
+		int leader_port_newclient;
+		char* msg_contact_leader;
+		leader_port_newclient = ntohs(leader_addr->sin_port);
+		msg_contact_leader = int_to_string(leader_port_newclient);
+		resp->body = msg_contact_leader;
+		resp->status = 5;
+		//printf("contact leader\n");
+        
 	}
     
-	if(leader == 0 && strcmp(name, username) != 0) {
-		// Other new chatters
-		new_ctr = &chatters[nchatters++];
-		new_ctr->name = name;
-		new_ctr->host = host;
-		new_ctr->port = port;
-		new_ctr->leader = 0;
-		new_ctr->last_hb = 0;
-	}
     
-	printf("NOTICE %s joined on %s:%d\n", name, host, port);
+    //	Chatter *new_ctr;
+    //	char *name = req.param[0];
+    //	char *host = req.param[1];
+    //	int port;
+    //	if(string_to_int(req.param[2], &port) < 0) {
+    //		perror("Invalid port number");
+    //	}
+    //
+    //	if(leader == 0 && strcmp(name, username) != 0) {
+    //		// Other new chatters
+    //		new_ctr = &chatters[nchatters++];
+    //		new_ctr->name = name;
+    //		new_ctr->host = host;
+    //		new_ctr->port = port;
+    //		new_ctr->leader = 0;
+    //		new_ctr->last_hb = 0;
+    //	}
+    //
+    //	printf("NOTICE %s joined on %s:%d\n", name, host, port);
 }
 
 /* Handle message broadcast */

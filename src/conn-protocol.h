@@ -53,9 +53,9 @@ void set_recv_timeout(int sock, int to_sec) {
 	struct timeval timeout;
 	timeout.tv_sec = to_sec;
 	timeout.tv_usec = 0;
-
+    
 	if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
-		(char *) &timeout, sizeof(timeout)) < 0) {
+                  (char *) &timeout, sizeof(timeout)) < 0) {
 		perror("setsockopt");
 		exit(EXIT_FAILURE);
 	}
@@ -63,10 +63,10 @@ void set_recv_timeout(int sock, int to_sec) {
 
 /* Create a socket address with givin host and port */
 struct sockaddr_in * make_sock_addr(const char *host,
-		const uint16_t port) {
+                                    const uint16_t port) {
 	struct sockaddr_in *addr;
 	char *addr_name = NULL;
-
+    
 	if(host != NULL) {
 		addr_name = (char *) malloc(sizeof(char) * (strlen(host) + 1));
 		strcpy(addr_name, host);
@@ -103,7 +103,7 @@ int get_port_number(const int sock) {
 char * get_host_addr(struct sockaddr_in addr) {
 	char *buf = (char *) malloc(sizeof(char) * 20);
 	inet_ntop(AF_INET, &addr.sin_addr, buf,
-		(socklen_t) sizeof(struct sockaddr_in));
+              (socklen_t) sizeof(struct sockaddr_in));
 	return buf;
 }
 
@@ -114,7 +114,7 @@ int create_socket(const struct sockaddr_in addr) {
 		perror("socket");
 		exit(EXIT_FAILURE);
 	}
-
+    
 	if(bind(sock, (struct sockaddr *) &addr,
 			(socklen_t) sizeof(addr)) < 0) {
 		perror("bind");
@@ -137,7 +137,7 @@ int compose_req_msg(const Request req, char **msg_o) {
 	int i;
 	char *seq_str;
 	char *msg;
-
+    
 	// Calculate msg length
 	len += strlen(PROTOCOL_NAME) + strlen(LF);
 	seq_str = int_to_string(req.seq);
@@ -147,7 +147,7 @@ int compose_req_msg(const Request req, char **msg_o) {
 	for(i = 0; i < req.paramc; i++) {
 		len += strlen(LF) + strlen(req.param[i]);
 	}
-
+    
 	msg = (char *) malloc(sizeof(char) * (len + 1));
 	strcat(msg, PROTOCOL_NAME);
 	strcat(msg, LF);
@@ -172,7 +172,7 @@ int compose_resp_msg(const Response resp, char **msg_o) {
 	char *ack_str;
 	char *status_str;
 	char *msg;
-
+    
 	// Calculate msg length
 	len += strlen(PROTOCOL_NAME) + strlen(LF);
 	seq_str = int_to_string(resp.seq);
@@ -186,7 +186,7 @@ int compose_resp_msg(const Response resp, char **msg_o) {
 		len += strlen(LF);
 		len += strlen(resp.body);
 	}
-
+    
 	msg = (char *) malloc(sizeof(char) * (len + 1));
 	strcat(msg, PROTOCOL_NAME);
 	strcat(msg, LF);
@@ -212,7 +212,7 @@ int recv_packet(int sock, struct sockaddr_in *addr, char **body_p) {
 	char *body;
 	socklen_t size = (socklen_t) sizeof(struct sockaddr_in);
 	nbytes = recvfrom(sock, buffer, BUFFER_SIZE, 0,
-			(struct sockaddr *) addr, &size);
+                      (struct sockaddr *) addr, &size);
 	if(nbytes > 0) {
 		body = (char *) malloc(sizeof(char) * (nbytes + 1));
 		strncpy(body, buffer, nbytes);
@@ -234,7 +234,7 @@ int parse_req_packet(char *body, Request *req) {
 	int i = 0;
 	char c;
 	int lines = 0;
-
+    
 	if(req == NULL) {
 		return -1;
 	}
@@ -255,7 +255,7 @@ int parse_req_packet(char *body, Request *req) {
 	}
 	req->seq = seq;
 	start += strlen(LF);
-
+    
 	msg = body + start;
 	if(*msg) {
 		req->req = strtok(NULL, LF);
@@ -284,14 +284,14 @@ int parse_resp_packet(const char *body, Response *resp) {
 	int len;
 	int l;
 	char *parse;
-
+    
 	if(resp == NULL) {
 		return -1;
 	}
 	l = strlen(body);
 	parse = (char *) malloc(sizeof(char) + (l + 1));
 	strncpy(parse, body, l);
-
+    
 	tok = strtok(parse, LF);
 	start += strlen(tok) + strlen(LF);
 	if(strcmp(tok, PROTOCOL_NAME) != 0) {
@@ -305,7 +305,7 @@ int parse_resp_packet(const char *body, Response *resp) {
 		return -1;
 	}
 	resp->seq = seq;
-
+    
 	tok = strtok(NULL, LF);
 	start += strlen(tok) + strlen(LF);
 	if(string_to_int(tok, &ack) < 0) {
@@ -314,7 +314,7 @@ int parse_resp_packet(const char *body, Response *resp) {
 	}
 	resp->ack = ack;
 	start += strlen(LF);
-
+    
 	msg = parse + start;
 	if(*msg) {
 		tok = strtok(NULL, LF);
@@ -323,7 +323,7 @@ int parse_resp_packet(const char *body, Response *resp) {
 			perror("Invalid status code");
 			return -1;
 		}
-
+        
 		len = l - start;
 		if(len > 0) {
 			msg = (char *) malloc(sizeof(char) * (len + 1));
@@ -349,13 +349,13 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	int seq;
     int resend = 0;
     int temp_recv = 0;
-
+    
 	sock = make_req_socket();
 	set_recv_timeout(sock, RECV_TIMEOUT);
 	seq = local_seq++;
 	req->seq = seq;
 	len = compose_req_msg(*req, &msg);
-//	printf("Request:\n----\n%s\n----\n", msg);
+    //	printf("Request:\n----\n%s\n----\n", msg);
 	if(len < 0) {
 		perror("compose_req_msg");
 		return -1;
@@ -363,17 +363,18 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	// Send message
     while (1) {
         nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
-                (socklen_t) sizeof(struct sockaddr_in));
+                        (socklen_t) sizeof(struct sockaddr_in));
         if(nbytes < 0) {
             return -1;
         }
         // Wait for response or ack
         temp_recv = recv_packet(sock, &r_addr, &resp_body);
         if( temp_recv < 0 && resend < 3) {
-            printf("Timout reached. Resending segment\n");
+            //printf("Timout reached. Resending segment\n");
             //return -2;
         }
         else if (temp_recv < 0 && resend >= 3){
+        	printf("sending message failed\n");
             return -2;
         }
         else
@@ -385,7 +386,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 	if(parse_resp_packet(resp_body, resp) < 0) {
 		return -3;
 	}
-//	printf("Response:\n----\n%s\n----\n", resp_body);
+    //	printf("Response:\n----\n%s\n----\n", resp_body);
 	if(seq != resp->ack) {
 		perror("Ack number does not match");
 		return -4;
@@ -400,21 +401,21 @@ int send_response(const struct sockaddr_in addr, Response *resp) {
 	int nbytes;
 	char *msg;
 	int seq;
-
+    
 	sock = make_req_socket();
 	set_recv_timeout(sock, RECV_TIMEOUT);
 	seq = local_seq++;
 	resp->seq = seq;
 	len = compose_resp_msg(*resp, &msg);
-
+    
 	if(len < 0) {
 		perror("Cannot compose response");
 		return -1;
 	}
-//	printf("Send response:\nlength: %d\n----\n%s\n----\n", len, msg);
+    //	printf("Send response:\nlength: %d\n----\n%s\n----\n", len, msg);
 	// Send message
 	nbytes = sendto(sock, msg, len, 0, (struct sockaddr *) &addr,
-				(socklen_t) sizeof(struct sockaddr_in));
+                    (socklen_t) sizeof(struct sockaddr_in));
 	if(nbytes < 0) {
 		return -1;
 	}
