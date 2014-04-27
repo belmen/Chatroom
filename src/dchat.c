@@ -656,7 +656,7 @@ void handle_bc_quit(const Request req, Response *resp) {
 	if(is_leader && leader == 0) {
 		// TODO: Leader election
 		// Now we just quit
-		//quit_chatroom();
+		quit_chatroom();
         //		while(1){
         //
         //		}
@@ -758,66 +758,65 @@ void *(HeartBeatProcessor())
         }
         printf("My port number: %d\n", myport);
         /**************updated sorting**************/
-        while(1){
-            if(!leader_down){ //break too slow!
-                break;
+        while(leader_down){
+            if(myport < sorted_portNumber[0]){
+                for (int num = 0; num < nchatters; num++){
+                    if(!leader_down){
+                        break;
+                    }
+                    if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
+                        sleep(5);
+                        hasBiggerRsp = 0;
+                    }
+                    else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
+                        Request elect_req;
+                        Response elect_rsp;
+                        int election_sock = sock_heartbeat;
+                        int bigger = sorted_portNumber[num];
+                        struct sockaddr_in *elect_addr;
+                        elect_addr = make_sock_addr("localhost", bigger);
+                        elect_req.req = REQ_ELECTION;
+                        encap_param(&elect_req, 1, username);
+                        int result = send_election(election_sock, *elect_addr, &elect_req, &elect_rsp);//send election message here.
+                        if(result > 0){
+                            printf("got the message response\n");
+                            hasBiggerRsp = 1;
+                        }
+                        //how to break this loop??
+                        //sleep(60); //for it to stay, haven't implement leader elected.
+                    }
+                }
             }
-            for (int num = 0; num < nchatters; num++){
-                if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
-                    sleep(5);
-                    hasBiggerRsp = 0;
-                }
-                else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
-                    Request elect_req;
-                    Response elect_rsp;
-                    int election_sock = sock_heartbeat;
-                    int bigger = sorted_portNumber[num];
-                    struct sockaddr_in *elect_addr;
-                    elect_addr = make_sock_addr("localhost", bigger);
-                    elect_req.req = REQ_ELECTION;
-                    encap_param(&elect_req, 1, username);
-                    int result = send_election(election_sock, *elect_addr, &elect_req, &elect_rsp);//send election message here.
-                    if(result > 0){
-                        //printf("got the message response\n");
-                        hasBiggerRsp = 1;
+            /*************I have the highest port number and ready to announce myself as leader******************/
+            else {
+                sleep(3);
+                add_broadcast(ANNOUNCE, 3, username, LOOPBACK_STR, myport);
+                /* Send broadcast message to all clients */
+                struct sockaddr_in addr;
+                Response resp;
+                Chatter chatter;
+                int i;
+                for(i = 0; i < nchatters; i++) {
+                    chatter = chatters[i];
+                    //not send announce msg to myself
+                    if(chatter.port != myport) {
+                        addr = *make_sock_addr(chatter.host, chatter.port);
+                        send_request(addr, broadcast_req, &resp);
                     }
-                    sleep(60); //for it to stay, haven't implement leader elected.
+                    else {
+                        chatters[i].leader = 1;
+                        chatters[i].last_hb = 0;
+                    }
                 }
+                broadcast_req = NULL;
+                
+                isnewleader = 1;//set the isnewleader flag = 1;begin close and open threads in start_input()
+                sleep(10);
                 /*************I have the highest port number and ready to announce myself as leader******************/
-                else{
-                    sleep(3);
-                    add_broadcast(ANNOUNCE, 3, username, LOOPBACK_STR, myport);
-                    /* Send broadcast message to all clients */
-                    struct sockaddr_in addr;
-                    Response resp;
-                    Chatter chatter;
-                    int i;
-                    for(i = 0; i < nchatters; i++) {
-                        chatter = chatters[i];
-                        //not send announce msg to myself
-                        if(chatter.port != myport) {
-                            addr = *make_sock_addr(chatter.host, chatter.port);
-                            send_request(addr, broadcast_req, &resp);
-                        }
-                        else {
-                            chatters[i].leader = 1;
-                            chatters[i].last_hb = 0;
-                        }
-                    }
-                    broadcast_req = NULL;
-                    
-                    isnewleader = 1;//set the isnewleader flag = 1;begin close and open threads in start_input()
-                    //announce_leader();
-                    /*************I have the highest port number and ready to announce myself as leader******************/
-                }
             }
         }
     }
 }
-
-//void announce_leader(){ //undeclared
-//
-//}
 
 int send_election(const int sock, const struct sockaddr_in addr, Request *req, Response *resp){
     //struct sockaddr_in r_addr;
@@ -854,7 +853,7 @@ int send_election(const int sock, const struct sockaddr_in addr, Request *req, R
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
         if( temp_recv < 0 && resend < 3) {
-            printf("Timout reached. Resending beat\n");
+            printf("Timout reached. Resending election\n");
         }
         else if (temp_recv < 0 && resend >= 3){
             //printf("return -2\n");
