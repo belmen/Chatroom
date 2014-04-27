@@ -770,12 +770,12 @@ void handle_bc_quit(const Request req, Response *resp) {
 }
 
 void handle_bc_election(const Request req, Response *resp){
-    printf("I got election message from %s\n", req.param[0]);
+    //printf("I got election message from %s\n", req.param[0]);
 }
 
 void handle_bc_announce(const Request req, Response *resp){
     //flag to close heartbeat thread and start check chatter thread
-	printf("received new leader announce\n");
+	printf("received new leader announce from: %s\n", req.param[0]);
     int newleader_port;
     //string_to_int(req.param[2], &newleader_port);
     int i_iter;
@@ -873,9 +873,9 @@ void *(HeartBeatProcessor())
         }
         int c;
         for(c = 0; c < nchatters; c++){
-            printf("Port number: %d\n",sorted_portNumber[c]);
+            //printf("Port number: %d\n",sorted_portNumber[c]);
         }
-        printf("My port number: %d\n", myport);
+        //printf("My port number: %d\n", myport);
         /**************updated sorting**************/
         
         while(leader_down){
@@ -900,7 +900,7 @@ void *(HeartBeatProcessor())
 						encap_param(&elect_req, 1, username);
 						int result = send_election(election_sock, *elect_addr, &elect_req, &elect_rsp);//send election message here.
 						if(result > 0){
-							printf("got the message response\n");
+							//printf("got the message response\n");
 							hasBiggerRsp = 1;
 						}
 						else{
@@ -955,7 +955,7 @@ void *(HeartBeatProcessor())
 				int iter;
 				int lower = 0;
                 
-				printf("before sending announce\n");
+				//printf("before sending announce\n");
 				for (iter = 0; iter < nchatters; iter++){
 					if (chatters[iter].port != myport){
 						struct sockaddr_in *anounce_to_addr;
@@ -963,11 +963,11 @@ void *(HeartBeatProcessor())
 						anounce_to_addr = make_sock_addr("localhost", lower);
 						anounce_req.req = ANNOUNCE;
 						encap_param(&anounce_req, 1, username);
-						printf("just before send_election\n");
+						//printf("just before send_election\n");
 						int result = send_election(anounce_sock, *anounce_to_addr, &anounce_req, &anounce_rsp);//send election message here.
-						printf("after send_election\n");
+						//printf("after send_election\n");
 						if(result > 0){
-							printf("got the anounce message response\n");
+							//printf("got the anounce message response\n");
 							hasBiggerRsp = 1;
 						}
 						else
@@ -1030,7 +1030,7 @@ int send_election(const int sock, const struct sockaddr_in addr, Request *req, R
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
         if( temp_recv < 0 && resend < 2) {
-            printf("Timout reached. Send election\n");
+            //printf("Timout reached. Send election\n");
         }
         else if (temp_recv < 0 && resend >= 2){
             //printf("return -2\n");
@@ -1085,7 +1085,7 @@ int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
         if( temp_recv < 0 && resend < 2) {
-            printf("Timout reached. Resending beat\n");
+            //printf("Timout reached. Resending beat\n");
         }
         else if (temp_recv < 0 && resend >= 2){
             //printf("return -2\n");
