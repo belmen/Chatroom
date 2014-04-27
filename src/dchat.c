@@ -84,12 +84,14 @@ Request heartBeat_msg;
 int heartbeat_seq = 0;//define heartbeat msg sequence number
 pthread_t check_chatter_thread; //for leader, start a thread checking the chatter.
 pthread_t thread_HeartBeat;
+pthread_t read_input;
 /*********hear beat end***********/
 /*********leader election*********/
 int leader_down = 0;
 int isnewleader = 0;
 void handle_bc_election(const Request req, Response *resp);
 void handle_bc_announce(const Request req, Response *resp);
+void *start_read_input();
 int send_election(const int sock, const struct sockaddr_in addr, Request *req, Response *resp);
 /*********leader election*********/
 
@@ -169,31 +171,52 @@ void start_input() {
 	int len;
     
 	while(1) {
-        /******become new leader**********/
-		if (isnewleader){
-			//clear client related thread
-			pthread_cancel(listen_thread);
-			pthread_cancel(thread_HeartBeat);
-			//start leader related thread
-			pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
-			pthread_create(&check_chatter_thread, NULL, check_chatters, NULL);
-            
-			//broadcast current chatter List to all clients
-            
-            
-            
-            
-			//output new user info
-			int newleader_port = get_port_number(listen_sock);
-			printf("%s elected as new leader, listening on %s:%d\n",
-		           username, LOOPBACK_STR, newleader_port);
+        
+        
+        
+		if(getline(&input, &size, stdin) < 0) { // EOF
+			break;
+		}
+		len = strlen(input);
+		if(len > 0) {
+			input[len - 1] = '\0'; // Remove new line
+		}
+		if(strlen(input) == 0) {
+			continue;
+		}
+		if(strcmp(input, ":users") == 0) { // List users
 			printf("Current users:\n");
 			print_current_chatters();
-            
-			//reset the flag
-			isnewleader = 0;
+		} else if(strcmp(input, ":quit") == 0) {
+			break;
+		} else if(leader) {
+			add_broadcast(REQ_MESSAGE, 2, username, input);
+			process_broadcast();
+		} else {
+			req.req = REQ_MESSAGE;
+			encap_param(&req, 2, username, input);
+			send_request(*leader_addr, &req, &resp);
 		}
-        /******become new leader**********/
+	}
+    
+	// Send exit request
+	send_quit();
+    
+	quit_chatroom();
+}
+
+
+/* Start monitoring input from console */
+void *start_read_input() {
+	char *input = NULL;
+	size_t size;
+	Request req;
+	Response resp;
+	int len;
+    
+	while(1) {
+        
+        
 		if(getline(&input, &size, stdin) < 0) { // EOF
 			break;
 		}
@@ -546,10 +569,39 @@ void start_client(char *addrport) {
     
 	// Start listening thread
 	pthread_create(&listen_thread, NULL, listening_for_broadcasts, NULL);
-	pthread_create(&thread_HeartBeat, NULL, HeartBeatProcessor, NULL);
+    pthread_create(&thread_HeartBeat, NULL, HeartBeatProcessor, NULL);
+    pthread_create(&read_input, NULL, start_read_input, NULL);
+    //start_input();
+    pthread_join( thread_HeartBeat, NULL);
+    
+    //when client become leader
+	/******become new leader**********/
+    
+	//clear client related thread
+	pthread_cancel(listen_thread);
+	//pthread_cancel(thread_HeartBeat);
+    
+	//start leader related thread
+	pthread_create(&listen_thread, NULL, listening_for_requests, NULL);
+	pthread_create(&check_chatter_thread, NULL, check_chatters, NULL);
+    
+	//broadcast current chatter List to all clients
+	//output new user info
+    
+	int newleader_port = get_port_number(listen_sock);
+	printf("%s elected as new leader, listening on %s:%d\n",
+		   username, LOOPBACK_STR, newleader_port);
+	printf("Current users:\n");
+	print_current_chatters();
+    
+	//reset the flag
+	//isnewleader = 0;
+    
+	/******become new leader**********/
+    
+	while(1);
     
     
-	start_input();
 }
 
 /* Decode chatters list from packet message */
@@ -694,19 +746,21 @@ void handle_bc_election(const Request req, Response *resp){
 
 void handle_bc_announce(const Request req, Response *resp){
     //flag to close heartbeat thread and start check chatter thread
-    printf("received new leader announce\n");
+	printf("received new leader announce\n");
     int newleader_port;
     //string_to_int(req.param[2], &newleader_port);
     int i_iter;
     
     for(i_iter = 0; i_iter < nchatters; i_iter++)
-        if(strcmp(chatters[i_iter].name, req.param[0]) == 0){
-            chatters[i_iter].leader = 1;
-            newleader_port = chatters[i_iter].port;
-        }
+    	if(strcmp(chatters[i_iter].name, req.param[0]) == 0){
+    		chatters[i_iter].leader = 1;
+    		newleader_port = chatters[i_iter].port;
+    	}
     
     leader_addr = make_sock_addr(LOOPBACK_STR, newleader_port);//set the leader_addr to newleader's address
     leader_down = 0;
+    
+    
 }
 
 /* Remove a chatter from chatter list */
@@ -757,6 +811,15 @@ void *(HeartBeatProcessor())
                 }
             }
         }
+        //        /*
+        //         * Shut down and close heartbeat socket completely.
+        //         */
+        //        int retval = shutdown(sock_heartbeat,2);
+        //        if (retval == -1)
+        //            perror ("shutdown");
+        //        retval = close (sock_heartbeat);
+        //        if (retval)
+        //            perror ("close");
         /**************updated sorting**************/
         int sorted_portNumber[nchatters];
         int i_sort;
@@ -789,7 +852,7 @@ void *(HeartBeatProcessor())
         /**************updated sorting**************/
         while(leader_down){
             if(myport < sorted_portNumber[0]){
-                int num;
+            	int num;
                 for (num = 0; num < nchatters; num++){
                     if(!leader_down){
                         break;
@@ -820,31 +883,60 @@ void *(HeartBeatProcessor())
             /*************I have the highest port number and ready to announce myself as leader******************/
             else {
                 sleep(3);
+                //add_broadcast(ANNOUNCE, 3, username, LOOPBACK_STR, myport);
                 Request anounce_req;
-                Response anounce_rsp;
-                int anounce_sock = sock_heartbeat;
-                int iter;
-                int lower = 0;
-                for (iter = 0; iter < nchatters; iter++){
-                    if (chatters[iter].port != myport){
-                        lower = chatters[iter].port;
-                        struct sockaddr_in *anounce_to_addr;
-                        anounce_to_addr = make_sock_addr("localhost", lower);
-                        anounce_req.req = ANNOUNCE;
-                        encap_param(&anounce_req, 1, username);
-                        int anounce = send_election(anounce_sock, *anounce_to_addr, &anounce_req, &anounce_rsp);//send election message here.
-                        if(anounce > 0){
-                            printf("got the anounce message response\n");
-                        }
-                    }
-                    else {
-                        chatters[iter].leader = 1;
-                        chatters[iter].last_hb = 0;
-                    }
-                }
+				Response anounce_rsp;
+				int anounce_sock = sock_heartbeat;
+				int iter;
+				int lower = 0;
+                
+				printf("before sending announce\n");
+				for (iter = 0; iter < nchatters; iter++){
+					if (chatters[iter].port != myport){
+						struct sockaddr_in *anounce_to_addr;
+						lower = chatters[iter].port;
+						anounce_to_addr = make_sock_addr("localhost", lower);
+						anounce_req.req = ANNOUNCE;
+						encap_param(&anounce_req, 1, username);
+						printf("just before send_election\n");
+						int result = send_election(anounce_sock, *anounce_to_addr, &anounce_req, &anounce_rsp);//send election message here.
+						printf("after send_election\n");
+						if(result > 0){
+							printf("got the anounce message response\n");
+							hasBiggerRsp = 1;
+						}
+						else
+							printf("send announce error\n");
+					}
+					else {
+						chatters[iter].leader = 1;
+						chatters[iter].last_hb = 0;
+					}
+				}
+                //                /* Send broadcast message to all clients */
+                //                struct sockaddr_in addr;
+                //                Response resp;
+                //                Chatter chatter;
+                //                int i;
+                //                for(i = 0; i < nchatters; i++) {
+                //                    chatter = chatters[i];
+                //                    //not send announce msg to myself
+                //                    if(chatter.port != myport) {
+                //                        addr = *make_sock_addr(chatter.host, chatter.port);
+                //                        send_request(addr, broadcast_req, &resp);
+                //                        printf("leader announce sent\n");
+                //                    }
+                //                    else {
+                //                        chatters[i].leader = 1;
+                //                        chatters[i].last_hb = 0;
+                //                    }
+                //                }
+                //                broadcast_req = NULL;
                 
                 isnewleader = 1;//set the isnewleader flag = 1;begin close and open threads in start_input()
-                sleep(10);
+                //sleep(10);
+                int x_return = 1;
+                pthread_exit(&x_return);
                 /*************I have the highest port number and ready to announce myself as leader******************/
             }
         }
@@ -890,7 +982,7 @@ int send_election(const int sock, const struct sockaddr_in addr, Request *req, R
         // Wait for response or ack
         temp_recv = recv_packet(sock, &addr, &resp_body);
         if( temp_recv < 0 && resend < 3) {
-            printf("Timout reached. Resending election\n");
+            printf("Timout reached. Send election\n");
         }
         else if (temp_recv < 0 && resend >= 3){
             //printf("return -2\n");
@@ -909,7 +1001,8 @@ int send_election(const int sock, const struct sockaddr_in addr, Request *req, R
 }
 
 int send_HeartBeat(const struct sockaddr_in addr, Request *req, int sock) {
-    printf("send Heartbeat\n");
+	//printf("send heart beat\n");
+    
 	//struct sockaddr_in r_addr;
 	char *msg;
 	int len;
