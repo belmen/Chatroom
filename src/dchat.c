@@ -268,7 +268,7 @@ void *start_read_input() {
 	send_quit();
     
 	quit_chatroom();
-    while (1) {}
+//    while (1) {}
 }
 
 /* Quit chatroom */
