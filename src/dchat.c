@@ -753,7 +753,7 @@ void handle_bc_join(const Request req, Response *resp) {
 	}
 	else if (req.paramc == 4)
 	{
-		printf("enter paramc ==0\n");
+		//printf("enter paramc ==0\n");
 		int leader_port_newclient;
 		char* msg_contact_leader;
 		leader_port_newclient = ntohs(leader_addr->sin_port);
