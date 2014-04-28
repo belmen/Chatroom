@@ -583,6 +583,14 @@ void start_client(char *addrport) {
             printf("Bye.\n");
             exit(EXIT_FAILURE);
 		}
+        if(resp.status < 0) {
+            printf("Failed to join chat on %s:%d.", ldr_addr_str, ldr_port);
+            if(resp.status == -2) {
+                printf("\nName already exists. Choose another name.");
+            }
+            printf("\n");
+            exit(EXIT_FAILURE);
+        }
 	}
     
 	decode_chatters(resp.body);
