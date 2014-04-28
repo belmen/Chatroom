@@ -1022,8 +1022,10 @@ void *(HeartBeatProcessor())
 							//printf("got the anounce message response\n");
 							hasBiggerRsp = 1;
 						}
-						else
+						else{
 							printf("send announce error\n");
+                            //remove_user(chatters[iter].name);
+                        }
 					}
 					else {
 						chatters[iter].leader = 1;
