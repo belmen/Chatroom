@@ -938,7 +938,7 @@ void *(HeartBeatProcessor())
 						break;
 					}
 					if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
-						sleep(1);
+						sleep(3);
 						hasBiggerRsp = 0;
 					}
 					else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
