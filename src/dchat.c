@@ -718,9 +718,15 @@ void *(listening_for_broadcasts()) {
 				printf("Cannot parse packet body: %s\n", body);
 				continue;
 			}
-            handle_broadcast(req, &resp);
-            resp.ack = req.seq; // Set ack to request's seq
-            send_response(r_addr, &resp); // Send response
+            if (!checkDupl(req.seq)){
+                enqueue(req.seq);
+                handle_broadcast(req, &resp);
+                resp.ack = req.seq; // Set ack to request's seq
+                send_response(r_addr, &resp); // Send response
+            }
+            else{
+                enqueue(req.seq);
+            }
 		}
         else {
 			perror("recv_packet");
@@ -731,21 +737,9 @@ void *(listening_for_broadcasts()) {
 /* Handle received broadcast message */
 void handle_broadcast(const Request req, Response *resp) {
 	if(strcmp(req.req, REQ_JOIN) == 0) { // Someone joined
-        if (!checkDupl(req.seq)){
-            enqueue(req.seq);
-            handle_bc_join(req, resp);
-        }
-        else{
-            enqueue(req.seq);
-        }
+        handle_bc_join(req, resp);
 	} else if(strcmp(req.req, REQ_MESSAGE) == 0) { // Someone send msg
-        if (!checkDupl(req.seq)){
-            enqueue(req.seq);
-            handle_bc_message(req, resp);
-        }
-        else{
-            enqueue(req.seq);
-        }
+        handle_bc_message(req, resp);
 	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Someone quit
 		handle_bc_quit(req, resp);
 	} else if(strcmp(req.req, REQ_ELECTION) == 0){
