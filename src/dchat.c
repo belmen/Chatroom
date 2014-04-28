@@ -352,7 +352,7 @@ void *(check_chatters()) {
 			if (!chatters[i].leader){
 				time_t now = time(0);
 				time_t diff = now - chatters[i].last_hb;
-				if(diff > 10){
+				if(diff > 3){
 					char *lost_chatter = chatters[i].name;
 					remove_user(lost_chatter);
 					add_broadcast(REQ_QUIT, 3, lost_chatter, "c", "0");
@@ -961,7 +961,7 @@ void *(HeartBeatProcessor())
 						break;
 					}
 					if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
-						sleep(3);
+						sleep(1);
 						hasBiggerRsp = 0;
 					}
 					else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
