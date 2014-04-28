@@ -80,11 +80,6 @@ char *username;//the name of the user no matter client or leader
 
 
 /*********hear beat start*********/
-int array[4]={0,0,0,0};
-int* rear = array;
-int* limit = array + 3;
-
-
 int sock_heartbeat;
 Request heartBeat_msg;
 int heartbeat_seq = 0;//define heartbeat msg sequence number
@@ -103,22 +98,7 @@ void *start_read_input();
 int send_election(const int sock, const struct sockaddr_in addr, Request *req, Response *resp);
 
 /*********leader election*********/
-void enqueue(int val){
-    if (rear > limit) {
-        rear = array;
-    }
-    *rear = val;
-    rear++;
-}
-int checkDupl(int val){
-    int checknum;
-    for(checknum = 0; checknum < 4; checknum++){
-        if (array[checknum] == val) {
-            return 1;
-        }
-    }
-    return 0;
-}
+
 
 int main(int argc, char *argv[]) {
 	char* addrport = NULL;
@@ -268,7 +248,6 @@ void *start_read_input() {
 	send_quit();
     
 	quit_chatroom();
-//    while (1) {}
 }
 
 /* Quit chatroom */
@@ -352,7 +331,7 @@ void *(check_chatters()) {
 			if (!chatters[i].leader){
 				time_t now = time(0);
 				time_t diff = now - chatters[i].last_hb;
-				if(diff > 3){
+				if(diff > 10){
 					char *lost_chatter = chatters[i].name;
 					remove_user(lost_chatter);
 					add_broadcast(REQ_QUIT, 3, lost_chatter, "c", "0");
@@ -718,11 +697,10 @@ void *(listening_for_broadcasts()) {
 				printf("Cannot parse packet body: %s\n", body);
 				continue;
 			}
-            handle_broadcast(req, &resp);
-            resp.ack = req.seq; // Set ack to request's seq
-            send_response(r_addr, &resp); // Send response
-		}
-        else {
+			handle_broadcast(req, &resp);
+			resp.ack = req.seq; // Set ack to request's seq
+			send_response(r_addr, &resp); // Send response
+		} else {
 			perror("recv_packet");
 		}
 	}
@@ -731,21 +709,9 @@ void *(listening_for_broadcasts()) {
 /* Handle received broadcast message */
 void handle_broadcast(const Request req, Response *resp) {
 	if(strcmp(req.req, REQ_JOIN) == 0) { // Someone joined
-        if (!checkDupl(req.seq)){
-            enqueue(req.seq);
-            handle_bc_join(req, resp);
-        }
-        else{
-            enqueue(req.seq);
-        }
+		handle_bc_join(req, resp);
 	} else if(strcmp(req.req, REQ_MESSAGE) == 0) { // Someone send msg
-        if (!checkDupl(req.seq)){
-            enqueue(req.seq);
-            handle_bc_message(req, resp);
-        }
-        else{
-            enqueue(req.seq);
-        }
+		handle_bc_message(req, resp);
 	} else if(strcmp(req.req, REQ_QUIT) == 0) { // Someone quit
 		handle_bc_quit(req, resp);
 	} else if(strcmp(req.req, REQ_ELECTION) == 0){
@@ -840,7 +806,10 @@ void handle_bc_quit(const Request req, Response *resp) {
 	if(is_leader && leader == 0) {
 		// TODO: Leader election
 		// Now we just quit
-		quit_chatroom();
+		//quit_chatroom();
+        //		while(1){
+        //
+        //		}
 	}
 }
 
@@ -851,7 +820,7 @@ void handle_bc_election(const Request req, Response *resp){
 void handle_bc_announce(const Request req, Response *resp){
     //flag to close heartbeat thread and start check chatter thread
 	printf("received new leader announce from: %s\n", req.param[0]);
-    int newleader_port = 0;
+    int newleader_port;
     //string_to_int(req.param[2], &newleader_port);
     int i_iter;
     
@@ -961,7 +930,7 @@ void *(HeartBeatProcessor())
 						break;
 					}
 					if(hasBiggerRsp){ //and ALSO leader hasn't been announced.
-						sleep(1);
+						sleep(3);
 						hasBiggerRsp = 0;
 					}
 					else if(myport < sorted_portNumber[num]){ //if the largest port number is not mine
