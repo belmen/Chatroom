@@ -392,6 +392,7 @@ int send_request(const struct sockaddr_in addr, Request *req, Response *resp) {
 		return -4;
 	}
 	shutdown(sock, 0); // Close socket
+    close(sock);
 	return 0;
 }
 
@@ -420,5 +421,6 @@ int send_response(const struct sockaddr_in addr, Response *resp) {
 		return -1;
 	}
 	shutdown(sock, 0); // Close socket
+    close(sock);
 	return 0;
 }
